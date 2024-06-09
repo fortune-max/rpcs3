@@ -9,33 +9,36 @@ LOG_CHANNEL(sys_net);
 lv2_socket_p2p::lv2_socket_p2p(lv2_socket_family family, lv2_socket_type type, lv2_ip_protocol protocol)
 	: lv2_socket(family, type, protocol)
 {
+	sockopt_cache cache_type;
+	cache_type.data._int = SYS_NET_SOCK_DGRAM_P2P;
+	cache_type.len = 4;
+
+	sockopts[(static_cast<u64>(SYS_NET_SOL_SOCKET) << 32ull) | SYS_NET_SO_TYPE] = cache_type;
 }
 
 lv2_socket_p2p::lv2_socket_p2p(utils::serial& ar, lv2_socket_type type)
-	: lv2_socket(ar, type)
+	: lv2_socket(stx::make_exact(ar), type)
 {
 	ar(port, vport, bound_addr);
 
-	std::deque<std::pair<sys_net_sockaddr_in_p2p, std::vector<u8>>> data_dequeue{ar};
+	auto data_dequeue = ar.pop<std::deque<std::pair<sys_net_sockaddr_in_p2p, std::vector<u8>>>>();
 
 	for (; !data_dequeue.empty(); data_dequeue.pop_front())
 	{
-		data.push(data_dequeue.front());
+		data.push(std::move(data_dequeue.front()));
 	}
-
-	ar(data_dequeue);
 }
 
 void lv2_socket_p2p::save(utils::serial& ar)
 {
-	static_cast<lv2_socket*>(this)->save(ar, true);
+	lv2_socket::save(ar, true);
 	ar(port, vport, bound_addr);
 
 	std::deque<std::pair<sys_net_sockaddr_in_p2p, std::vector<u8>>> data_dequeue;
 
-	for (; !data.empty(); data.pop())
+	for (auto save_data = ::as_rvalue(data); !save_data.empty(); save_data.pop())
 	{
-		data_dequeue.push_back(data.front());
+		data_dequeue.push_back(std::move(save_data.front()));
 	}
 
 	ar(data_dequeue);
@@ -118,16 +121,14 @@ s32 lv2_socket_p2p::bind(const sys_net_sockaddr& addr)
 
 	socket_type real_socket{};
 
-	auto& nc = g_fxo->get<network_context>();
+	auto& nc = g_fxo->get<p2p_context>();
 	{
 		std::lock_guard list_lock(nc.list_p2p_ports_mutex);
-		if (!nc.list_p2p_ports.contains(p2p_port))
-		{
-			nc.list_p2p_ports.emplace(std::piecewise_construct, std::forward_as_tuple(p2p_port), std::forward_as_tuple(p2p_port));
-		}
 
+		nc.create_p2p_port(p2p_port);
 		auto& pport = ::at32(nc.list_p2p_ports, p2p_port);
 		real_socket = pport.p2p_socket;
+
 		{
 			std::lock_guard lock(pport.bound_p2p_vports_mutex);
 
@@ -222,7 +223,7 @@ s32 lv2_socket_p2p::setsockopt(s32 level, s32 optname, const std::vector<u8>& op
 	const u64 key = (static_cast<u64>(level) << 32) | static_cast<u64>(optname);
 	sockopt_cache cache{};
 	memcpy(&cache.data._int, optval.data(), optval.size());
-	cache.len = optval.size();
+	cache.len = ::size32(optval);
 
 	sockopts[key] = std::move(cache);
 
@@ -238,8 +239,6 @@ std::optional<std::tuple<s32, std::vector<u8>, sys_net_sockaddr>> lv2_socket_p2p
 		lock.lock();
 	}
 
-	sys_net.trace("[P2P] p2p_data for vport %d contains %d elements", vport, data.size());
-
 	if (data.empty())
 	{
 		if (so_nbio || (flags & SYS_NET_MSG_DONTWAIT))
@@ -247,6 +246,8 @@ std::optional<std::tuple<s32, std::vector<u8>, sys_net_sockaddr>> lv2_socket_p2p
 
 		return std::nullopt;
 	}
+
+	sys_net.trace("[P2P] p2p_data for vport %d contains %d elements", vport, data.size());
 
 	std::vector<u8> res_buf(len);
 
@@ -285,9 +286,11 @@ std::optional<s32> lv2_socket_p2p::sendto(s32 flags, const std::vector<u8>& buf,
 
 	std::vector<u8> p2p_data(buf.size() + VPORT_P2P_HEADER_SIZE);
 	const le_t<u16> p2p_vport_le = p2p_vport;
+	const le_t<u16> src_vport_le = vport;
 	const le_t<u16> p2p_flags_le = P2P_FLAG_P2P;
 	memcpy(p2p_data.data(), &p2p_vport_le, sizeof(u16));
-	memcpy(p2p_data.data() + sizeof(u16), &p2p_flags_le, sizeof(u16));
+	memcpy(p2p_data.data() + sizeof(u16), &src_vport_le, sizeof(u16));
+	memcpy(p2p_data.data() + sizeof(u16) + sizeof(u16), &p2p_flags_le, sizeof(u16));
 	memcpy(p2p_data.data() + VPORT_P2P_HEADER_SIZE, buf.data(), buf.size());
 
 	int native_flags = 0;
@@ -296,7 +299,7 @@ std::optional<s32> lv2_socket_p2p::sendto(s32 flags, const std::vector<u8>& buf,
 		native_flags |= MSG_WAITALL;
 	}
 
-	auto native_result = ::sendto(socket, reinterpret_cast<const char*>(p2p_data.data()), p2p_data.size(), native_flags, reinterpret_cast<struct sockaddr*>(&native_addr), sizeof(native_addr));
+	auto native_result = ::sendto(socket, reinterpret_cast<const char*>(p2p_data.data()), ::size32(p2p_data), native_flags, reinterpret_cast<struct sockaddr*>(&native_addr), sizeof(native_addr));
 
 	if (native_result >= 0)
 	{
@@ -327,10 +330,9 @@ void lv2_socket_p2p::close()
 		return;
 	}
 
-	auto& nc = g_fxo->get<network_context>();
+	auto& nc = g_fxo->get<p2p_context>();
 	{
 		std::lock_guard lock(nc.list_p2p_ports_mutex);
-		ensure(nc.list_p2p_ports.contains(port));
 		auto& p2p_port = ::at32(nc.list_p2p_ports, port);
 		{
 			std::lock_guard lock(p2p_port.bound_p2p_vports_mutex);
@@ -360,7 +362,7 @@ s32 lv2_socket_p2p::poll(sys_net_pollfd& sn_pfd, [[maybe_unused]] pollfd& native
 {
 	std::lock_guard lock(mutex);
 	ensure(vport);
-	sys_net.trace("[P2P] poll checking for 0x%X", sn_pfd.events);
+
 	// Check if it's a bound P2P socket
 	if ((sn_pfd.events & SYS_NET_POLLIN) && !data.empty())
 	{
@@ -393,7 +395,6 @@ std::tuple<bool, bool, bool> lv2_socket_p2p::select(bs_t<lv2_socket::poll_t> sel
 
 	if (selected & lv2_socket::poll_t::write)
 	{
-		sys_net.trace("[P2P] p2p_data for vport %d contains %d elements", vport, data.size());
 		write_set = true;
 	}
 

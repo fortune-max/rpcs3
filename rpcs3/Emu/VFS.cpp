@@ -13,16 +13,17 @@
 #endif
 
 #include <thread>
+#include <map>
 
 LOG_CHANNEL(vfs_log, "VFS");
 
 struct vfs_directory
 {
 	// Real path (empty if root or not exists)
-	std::string path{};
+	std::string path;
 
-	// Virtual subdirectories (vector because only vector allows incomplete types)
-	std::vector<std::pair<std::string, vfs_directory>> dirs{};
+	// Virtual subdirectories
+	std::map<std::string, std::unique_ptr<vfs_directory>> dirs;
 };
 
 struct vfs_manager
@@ -107,13 +108,13 @@ bool vfs::mount(std::string_view vpath, std::string_view path, bool is_dir)
 		}
 
 		// Find or add
-		const auto last = list.back();
+		vfs_directory* last = list.back();
 
-		for (auto& dir : last->dirs)
+		for (auto& [path, dir] : last->dirs)
 		{
-			if (dir.first == name)
+			if (path == name)
 			{
-				list.push_back(&dir.second);
+				list.push_back(dir.get());
 				break;
 			}
 		}
@@ -121,7 +122,9 @@ bool vfs::mount(std::string_view vpath, std::string_view path, bool is_dir)
 		if (last == list.back())
 		{
 			// Add new entry
-			list.push_back(&last->dirs.emplace_back(name, vfs_directory{}).second);
+			std::unique_ptr<vfs_directory> new_entry = std::make_unique<vfs_directory>();
+			list.push_back(new_entry.get());
+			last->dirs.emplace(name, std::move(new_entry));
 		}
 	}
 }
@@ -144,8 +147,10 @@ bool vfs::unmount(std::string_view vpath)
 
 	vfs_log.notice("About to unmount '%s'", vpath);
 
-	// Workaround
-	g_fxo->need<vfs_manager>();
+	if (!g_fxo->is_init<vfs_manager>())
+	{
+		return false;
+	}
 
 	auto& table = g_fxo->get<vfs_manager>();
 
@@ -172,13 +177,13 @@ bool vfs::unmount(std::string_view vpath)
 				// Remove the matching node if we reached the maximum depth
 				if (depth + 1 == entry_list.size())
 				{
-					vfs_log.notice("Unmounting '%s' = '%s'", it->first, it->second.path);
+					vfs_log.notice("Unmounting '%s' = '%s'", it->first, it->second->path);
 					it = dir.dirs.erase(it);
 					continue;
 				}
 
 				// Otherwise continue searching in the next level of depth
-				unmount_children(it->second, depth + 1);
+				unmount_children(*it->second, depth + 1);
 			}
 
 			++it;
@@ -245,7 +250,7 @@ std::string vfs::get(std::string_view vpath, std::vector<std::string>* out_dir, 
 					{
 						for (auto& pair : dir->dirs)
 						{
-							if (!pair.second.path.empty())
+							if (!pair.second->path.empty())
 							{
 								out_dir->emplace_back(pair.first);
 							}
@@ -310,13 +315,13 @@ std::string vfs::get(std::string_view vpath, std::vector<std::string>* out_dir, 
 			continue;
 		}
 
-		for (auto& dir : last->dirs)
+		for (auto& [path, dir] : last->dirs)
 		{
-			if (dir.first == name)
+			if (path == name)
 			{
-				list.back() = &dir.second;
+				list.back() = dir.get();
 
-				if (dir.second.path == "/"sv)
+				if (dir->path == "/"sv)
 				{
 					if (vpath.size() <= 1)
 					{
@@ -407,7 +412,7 @@ std::string vfs::retrieve(std::string_view path, const vfs_directory* node, std:
 	{
 		mount_path->back() = name;
 
-		if (std::string res = vfs::retrieve(path, &dir, mount_path); !res.empty())
+		if (std::string res = vfs::retrieve(path, dir.get(), mount_path); !res.empty())
 		{
 			// Avoid app_home
 			// Prefer dev_bdvd over dev_hdd0
@@ -419,7 +424,7 @@ std::string vfs::retrieve(std::string_view path, const vfs_directory* node, std:
 			}
 		}
 
-		if (dir.path == "/"sv)
+		if (dir->path == "/"sv)
 		{
 			host_root_name = name;
 		}
@@ -920,9 +925,9 @@ std::string vfs::unescape(std::string_view name)
 	return result;
 }
 
-std::string vfs::host::hash_path(const std::string& path, const std::string& dev_root)
+std::string vfs::host::hash_path(const std::string& path, const std::string& dev_root, std::string_view prefix)
 {
-	return fmt::format(u8"%s/＄%s%s", dev_root, fmt::base57(std::hash<std::string>()(path)), fmt::base57(utils::get_unique_tsc()));
+	return fmt::format(u8"%s/＄%s%s%s", dev_root, fmt::base57(std::hash<std::string>()(path)), prefix, fmt::base57(utils::get_unique_tsc()));
 }
 
 bool vfs::host::rename(const std::string& from, const std::string& to, const lv2_fs_mount_point* mp, bool overwrite, bool lock)
@@ -1030,11 +1035,21 @@ bool vfs::host::unlink(const std::string& path, [[maybe_unused]] const std::stri
 	else
 	{
 		// Rename to special dummy name which will be ignored by VFS (but opened file handles can still read or write it)
-		const std::string dummy = hash_path(path, dev_root);
+		std::string dummy = hash_path(path, dev_root, "file");
 
-		if (!fs::rename(path, dummy, true))
+		while (true)
 		{
-			return false;
+			if (fs::rename(path, dummy, false))
+			{
+				break;
+			}
+
+			if (fs::g_tls_error != fs::error::exist)
+			{
+				return false;
+			}
+
+			dummy = hash_path(path, dev_root, "file");
 		}
 
 		if (fs::file f{dummy, fs::read + fs::write})
@@ -1054,17 +1069,33 @@ bool vfs::host::unlink(const std::string& path, [[maybe_unused]] const std::stri
 #endif
 }
 
-bool vfs::host::remove_all(const std::string& path, [[maybe_unused]] const std::string& dev_root, [[maybe_unused]] const lv2_fs_mount_point* mp, bool remove_root, [[maybe_unused]] bool lock)
+bool vfs::host::remove_all(const std::string& path, [[maybe_unused]] const std::string& dev_root, [[maybe_unused]] const lv2_fs_mount_point* mp, [[maybe_unused]] bool remove_root, [[maybe_unused]] bool lock, [[maybe_unused]] bool force_atomic)
 {
-#ifdef _WIN32
+#ifndef _WIN32
+	if (!force_atomic)
+	{
+		return fs::remove_all(path, remove_root);
+	}
+#endif
+
 	if (remove_root)
 	{
 		// Rename to special dummy folder which will be ignored by VFS (but opened file handles can still read or write it)
-		const std::string dummy = hash_path(path, dev_root);
+		std::string dummy = hash_path(path, dev_root, "dir");
 
-		if (!vfs::host::rename(path, dummy, mp, false, lock))
+		while (true)
 		{
-			return false;
+			if (vfs::host::rename(path, dummy, mp, false, lock))
+			{
+				break;
+			}
+
+			if (fs::g_tls_error != fs::error::exist)
+			{
+				return false;
+			}
+
+			dummy = hash_path(path, dev_root, "dir");
 		}
 
 		if (!vfs::host::remove_all(dummy, dev_root, mp, false, lock))
@@ -1111,7 +1142,4 @@ bool vfs::host::remove_all(const std::string& path, [[maybe_unused]] const std::
 	}
 
 	return true;
-#else
-	return fs::remove_all(path, remove_root);
-#endif
 }

@@ -21,9 +21,10 @@ std::string wchar_to_utf8(std::wstring_view src)
 {
 #ifdef _WIN32
 	std::string utf8_string;
-	const auto tmp_size = WideCharToMultiByte(CP_UTF8, 0, src.data(), src.size(), nullptr, 0, nullptr, nullptr);
+	const int size = ::narrow<int>(src.size());
+	const auto tmp_size = WideCharToMultiByte(CP_UTF8, 0, src.data(), size, nullptr, 0, nullptr, nullptr);
 	utf8_string.resize(tmp_size);
-	WideCharToMultiByte(CP_UTF8, 0, src.data(), src.size(), utf8_string.data(), tmp_size, nullptr, nullptr);
+	WideCharToMultiByte(CP_UTF8, 0, src.data(), size, utf8_string.data(), tmp_size, nullptr, nullptr);
 	return utf8_string;
 #else
 	std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> converter{};
@@ -31,6 +32,16 @@ std::string wchar_to_utf8(std::wstring_view src)
 #endif
 }
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#elif defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#else
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
 std::string utf16_to_utf8(std::u16string_view src)
 {
 	std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> converter{};
@@ -42,14 +53,22 @@ std::u16string utf8_to_utf16(std::string_view src)
 	std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> converter{};
 	return converter.from_bytes(src.data());
 }
+#ifdef _MSC_VER
+#pragma warning(pop)
+#elif defined(__clang__)
+#pragma clang diagnostic pop
+#else
+#pragma GCC diagnostic pop
+#endif
 
 std::wstring utf8_to_wchar(std::string_view src)
 {
 #ifdef _WIN32
 	std::wstring wchar_string;
-	const auto tmp_size = MultiByteToWideChar(CP_UTF8, 0, src.data(), src.size(), nullptr, 0);
+	const int size = ::narrow<int>(src.size());
+	const auto tmp_size = MultiByteToWideChar(CP_UTF8, 0, src.data(), size, nullptr, 0);
 	wchar_string.resize(tmp_size);
-	MultiByteToWideChar(CP_UTF8, 0, src.data(), src.size(), wchar_string.data(), tmp_size);
+	MultiByteToWideChar(CP_UTF8, 0, src.data(), size, wchar_string.data(), tmp_size);
 	return wchar_string;
 #else
 	std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>, wchar_t> converter{};
@@ -395,22 +414,35 @@ void fmt_class_string<s128>::format(std::string& out, u64 arg)
 }
 
 template <>
-void fmt_class_string<src_loc>::format(std::string& out, u64 arg)
+void fmt_class_string<std::source_location>::format(std::string& out, u64 arg)
 {
-	const src_loc& loc = get_object(arg);
+	const std::source_location& loc = get_object(arg);
 
-	if (loc.col != umax)
+	auto is_valid = [](auto num)
 	{
-		fmt::append(out, "\n(in file %s:%u[:%u]", loc.file, loc.line, loc.col);
+		return num && num != umax;
+	};
+
+	const bool has_line = is_valid(loc.line());
+
+	if (has_line && is_valid(loc.column()))
+	{
+		fmt::append(out, "\n(in file %s:%u[:%u]", loc.file_name(), loc.line(), loc.column());
 	}
+	else if (has_line)
+	{
+		fmt::append(out, "\n(in file %s:%u", loc.file_name(), loc.line());
+	}
+	// Let's not care about such useless corner cases
+	// else if (is_valid(loc.column())
 	else
 	{
-		fmt::append(out, "\n(in file %s:%u", loc.file, loc.line);
+		fmt::append(out, "\n(in file %s", loc.file_name());
 	}
 
-	if (loc.func && *loc.func)
+	if (auto func = loc.function_name(); func && func[0])
 	{
-		fmt::append(out, ", in function %s)", loc.func);
+		fmt::append(out, ", in function %s)", func);
 	}
 	else
 	{
@@ -433,14 +465,14 @@ void fmt_class_string<src_loc>::format(std::string& out, u64 arg)
 
 namespace fmt
 {
-	[[noreturn]] void raw_verify_error(const src_loc& loc, const char8_t* msg)
+	[[noreturn]] void raw_verify_error(std::source_location loc, const char8_t* msg)
 	{
 		std::string out;
 		fmt::append(out, "%s%s", msg ? msg : u8"Verification failed", loc);
 		thread_ctrl::emergency_exit(out);
 	}
 
-	[[noreturn]] void raw_throw_exception(const src_loc& loc, const char* fmt, const fmt_type_info* sup, const u64* args)
+	[[noreturn]] void raw_throw_exception(std::source_location loc, const char* fmt, const fmt_type_info* sup, const u64* args)
 	{
 		std::string out;
 		raw_append(out, fmt, sup, args);
@@ -499,7 +531,7 @@ struct fmt::cfmt_src
 		TYPE(llong);
 		TYPE(schar);
 		TYPE(short);
-		if (std::is_signed<char>::value) TYPE(char);
+		if (std::is_signed_v<char>) TYPE(char);
 		TYPE(long);
 		TYPE(s128);
 
@@ -598,12 +630,22 @@ std::vector<std::string> fmt::split(std::string_view source, std::initializer_li
 
 std::string fmt::trim(const std::string& source, std::string_view values)
 {
-	usz begin = source.find_first_not_of(values);
+	const usz begin = source.find_first_not_of(values);
 
 	if (begin == source.npos)
 		return {};
 
 	return source.substr(begin, source.find_last_not_of(values) + 1);
+}
+
+std::string fmt::trim_front(const std::string& source, std::string_view values)
+{
+	const usz begin = source.find_first_not_of(values);
+
+	if (begin == source.npos)
+		return {};
+
+	return source.substr(begin);
 }
 
 void fmt::trim_back(std::string& source, std::string_view values)
@@ -626,6 +668,11 @@ std::string fmt::to_lower(std::string_view string)
 	result.resize(string.size());
 	std::transform(string.begin(), string.end(), result.begin(), ::tolower);
 	return result;
+}
+
+std::string fmt::truncate(std::string_view src, usz length)
+{
+	return std::string(src.begin(), src.begin() + std::min(src.size(), length));
 }
 
 bool fmt::match(const std::string& source, const std::string& mask)

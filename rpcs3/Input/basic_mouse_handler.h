@@ -7,6 +7,11 @@
 #include <QMouseEvent>
 #include <QWheelEvent>
 
+namespace cfg
+{
+	class string;
+}
+
 class basic_mouse_handler final : public MouseHandlerBase, public QObject
 {
 	using MouseHandlerBase::MouseHandlerBase;
@@ -24,4 +29,7 @@ public:
 private:
 	QWindow* m_target = nullptr;
 	bool get_mouse_lock_state() const;
+	static int get_mouse_button(const cfg::string& button);
+
+	std::map<u8, int> m_buttons;
 };

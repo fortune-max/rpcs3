@@ -1,10 +1,11 @@
 #pragma once
 
 #include <list>
-#include <algorithm>
 #include <vector>
+#include "Utilities/StrFmt.h"
 #include "Utilities/mutex.h"
 #include "util/init_mutex.hpp"
+#include "Emu/system_config_types.h"
 
 // TODO: HLE info (constants, structs, etc.) should not be available here
 
@@ -48,6 +49,22 @@ enum
 	CELL_MOUSE_INFO_INTERCEPTED = 1
 };
 
+static inline MouseButtonCodes get_mouse_button_code(int i)
+{
+	switch (i)
+	{
+	case 0:	return CELL_MOUSE_BUTTON_1;
+	case 1:	return CELL_MOUSE_BUTTON_2;
+	case 2:	return CELL_MOUSE_BUTTON_3;
+	case 3:	return CELL_MOUSE_BUTTON_4;
+	case 4:	return CELL_MOUSE_BUTTON_5;
+	case 5:	return CELL_MOUSE_BUTTON_6;
+	case 6:	return CELL_MOUSE_BUTTON_7;
+	case 7:	return CELL_MOUSE_BUTTON_8;
+	default: fmt::throw_exception("get_mouse_button_code: Invalid index %d", i);
+	}
+}
+
 static const u32 MAX_MICE = 127;
 static const u32 MOUSE_MAX_DATA_LIST_NUM = 8;
 static const u32 MOUSE_MAX_CODES = 64;
@@ -78,7 +95,7 @@ struct MouseData
 	s8 x_axis = 0;
 	s8 y_axis = 0;
 	s8 wheel = 0;
-	s8 tilt = 0; // (TODO)
+	s8 tilt = 0;
 };
 
 struct MouseTabletData
@@ -110,18 +127,7 @@ protected:
 	std::vector<Mouse> m_mice;
 	steady_clock::time_point last_update{};
 
-	bool is_time_for_update(double elapsed_time = 10.0) // 4-10 ms, let's use 10 for now
-	{
-		steady_clock::time_point now = steady_clock::now();
-		double elapsed = (now - last_update).count() / 1000'000.;
-
-		if (elapsed > elapsed_time)
-		{
-			last_update = now;
-			return true;
-		}
-		return false;
-	}
+	bool is_time_for_update(double elapsed_time = 10.0); // 4-10 ms, let's use 10 for now
 
 public:
 	shared_mutex mutex;
@@ -131,127 +137,17 @@ public:
 
 	SAVESTATE_INIT_POS(18);
 
+	MouseHandlerBase(){};
 	MouseHandlerBase(const MouseHandlerBase&) = delete;
 	MouseHandlerBase(utils::serial* ar);
 	MouseHandlerBase(utils::serial& ar) : MouseHandlerBase(&ar) {}
 	void save(utils::serial& ar);
 
-	void Button(u8 button, bool pressed)
-	{
-		std::lock_guard lock(mutex);
+	void Button(u32 index, u8 button, bool pressed);
+	void Scroll(u32 index, s8 x, s8 y);
+	void Move(u32 index, s32 x_pos_new, s32 y_pos_new, s32 x_max, s32 y_max, const bool is_relative = false, s32 x_delta = 0, s32 y_delta = 0);
 
-		for (u32 p = 0; p < m_mice.size(); ++p)
-		{
-			if (m_info.status[p] != CELL_MOUSE_STATUS_CONNECTED)
-			{
-				continue;
-			}
-
-			MouseDataList& datalist = GetDataList(p);
-
-			if (datalist.size() > MOUSE_MAX_DATA_LIST_NUM)
-			{
-				datalist.pop_front();
-			}
-
-			if (pressed)
-				m_mice[p].buttons |= button;
-			else
-				m_mice[p].buttons &= ~button;
-
-			MouseData new_data;
-			new_data.update = CELL_MOUSE_DATA_UPDATE;
-			new_data.buttons = m_mice[p].buttons;
-
-			datalist.push_back(new_data);
-		}
-	}
-
-	void Scroll(const s8 rotation)
-	{
-		std::lock_guard lock(mutex);
-
-		for (u32 p = 0; p < m_mice.size(); ++p)
-		{
-			if (m_info.status[p] != CELL_MOUSE_STATUS_CONNECTED)
-			{
-				continue;
-			}
-
-			MouseDataList& datalist = GetDataList(p);
-
-			if (datalist.size() > MOUSE_MAX_DATA_LIST_NUM)
-			{
-				datalist.pop_front();
-			}
-
-			MouseData new_data;
-			new_data.update = CELL_MOUSE_DATA_UPDATE;
-			new_data.wheel = rotation / 120; //120=event.GetWheelDelta()
-			new_data.buttons = m_mice[p].buttons;
-
-			datalist.push_back(new_data);
-		}
-	}
-
-	void Move(s32 x_pos_new, s32 y_pos_new, s32 x_max, s32 y_max, const bool is_qt_fullscreen = false, s32 x_delta = 0, s32 y_delta = 0)
-	{
-		std::lock_guard lock(mutex);
-
-		for (u32 p = 0; p < m_mice.size(); ++p)
-		{
-			if (m_info.status[p] != CELL_MOUSE_STATUS_CONNECTED)
-			{
-				continue;
-			}
-
-			MouseDataList& datalist = GetDataList(p);
-
-			if (datalist.size() > MOUSE_MAX_DATA_LIST_NUM)
-			{
-				datalist.pop_front();
-			}
-
-			MouseData new_data;
-			new_data.update = CELL_MOUSE_DATA_UPDATE;
-			new_data.buttons = m_mice[p].buttons;
-
-			if (!is_qt_fullscreen)
-			{
-				x_delta = x_pos_new - m_mice[p].x_pos;
-				y_delta = y_pos_new - m_mice[p].y_pos;
-			}
-
-			new_data.x_axis = static_cast<s8>(std::clamp(x_delta, -127, 128));
-			new_data.y_axis = static_cast<s8>(std::clamp(y_delta, -127, 128));
-
-			m_mice[p].x_max = x_max;
-			m_mice[p].y_max = y_max;
-			m_mice[p].x_pos = x_pos_new;
-			m_mice[p].y_pos = y_pos_new;
-
-			/*CellMouseRawData& rawdata = GetRawData(p);
-			rawdata.data[rawdata.len % CELL_MOUSE_MAX_CODES] = 0; // (TODO)
-			rawdata.len++;*/
-
-			datalist.push_back(new_data);
-		}
-	}
-
-	void SetIntercepted(bool intercepted)
-	{
-		std::lock_guard lock(mutex);
-
-		m_info.info = intercepted ? CELL_MOUSE_INFO_INTERCEPTED : 0;
-
-		if (intercepted)
-		{
-			for (Mouse& mouse : m_mice)
-			{
-				mouse = {};
-			}
-		}
-	}
+	void SetIntercepted(bool intercepted);
 
 	MouseInfo& GetInfo() { return m_info; }
 	std::vector<Mouse>& GetMice() { return m_mice; }
@@ -260,4 +156,6 @@ public:
 	MouseRawData& GetRawData(const u32 mouse) { return m_mice[mouse].m_rawdata; }
 
 	stx::init_mutex init;
+
+	mouse_handler type = mouse_handler::null;
 };

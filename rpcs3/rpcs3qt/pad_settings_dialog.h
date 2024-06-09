@@ -72,9 +72,7 @@ class pad_settings_dialog : public QDialog
 		id_reset_parameters,
 		id_blacklist,
 		id_refresh,
-		id_add_config_file,
-		id_ok,
-		id_cancel
+		id_add_config_file
 	};
 
 	struct pad_button
@@ -89,7 +87,7 @@ class pad_settings_dialog : public QDialog
 	const QString Disconnected_suffix = tr(" (disconnected)");
 
 public:
-	explicit pad_settings_dialog(std::shared_ptr<gui_settings> gui_settings, QWidget *parent = nullptr, const GameInfo *game = nullptr);
+	explicit pad_settings_dialog(std::shared_ptr<gui_settings> gui_settings, QWidget* parent = nullptr, const GameInfo* game = nullptr);
 	~pad_settings_dialog();
 
 private Q_SLOTS:
@@ -205,9 +203,10 @@ private:
 	void ReloadButtons();
 
 	/** Repaints a stick deadzone preview label */
-	void RepaintPreviewLabel(QLabel* l, int deadzone, int desired_width, int x, int y, int squircle, double multiplier) const;
+	void RepaintPreviewLabel(QLabel* l, int deadzone, int anti_deadzone, int desired_width, int x, int y, int squircle, double multiplier) const;
 
 	QString GetLocalizedPadHandler(const QString& original, pad_handler handler);
+	QString GetLocalizedPadName(pad_handler handler, const QString& original, usz index);
 
 	/** Checks if the port at the given index is already reserved by the application as custom controller (ldd pad) */
 	bool GetIsLddPad(u32 index) const;
@@ -217,6 +216,12 @@ private:
 
 	/** Returns the current player config */
 	cfg_pad& GetPlayerConfig() const;
+
+	/** Sets the device name (member and config) */
+	void SetDeviceName(const std::string& name);
+
+	/** Gets the device name from config */
+	std::string GetDeviceName() const;
 
 	/** Resizes the dialog. We need to do this because the main scroll area can't determine the size on its own. */
 	void ResizeDialog();

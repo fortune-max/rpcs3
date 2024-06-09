@@ -113,7 +113,9 @@ bool check_movie_path(const std::string& file_path)
 
 std::string get_available_movie_path(const std::string& filename)
 {
-	const std::string movie_dir = "/dev_hdd0/movie/";
+	// TODO: Find out how to build this path properly. Apparently real hardware doesn't add a suffix,
+	//       but just randomly puts each video into a separate 2-Letter subdirectory like /video/hd/ or /video/ee/
+	const std::string movie_dir = "/dev_hdd0/video/";
 	std::string dst_path = vfs::get(movie_dir + filename);
 
 	// Do not overwrite existing files. Add a suffix instead.
@@ -235,16 +237,16 @@ error_code cellVideoExportFromFileWithCopy(vm::cptr<char> srcHddDir, vm::cptr<ch
 		return { CELL_VIDEO_EXPORT_UTIL_ERROR_PARAM, file_path };
 	}
 
-	std::string filename = param->title.get_ptr();
+	std::string filename;
+
+	if (srcHddFile)
+	{
+		fmt::append(filename, "%s", srcHddFile.get_ptr());
+	}
 
 	if (filename.empty())
 	{
-		return { CELL_VIDEO_EXPORT_UTIL_ERROR_PARAM, "title empty" };
-	}
-
-	if (const std::string extension = get_file_extension(file_path); !extension.empty())
-	{
-		fmt::append(filename, ".%s", extension);
+		return { CELL_VIDEO_EXPORT_UTIL_ERROR_PARAM, "filename empty" };
 	}
 
 	sysutil_register_cb([=](ppu_thread& ppu) -> s32
@@ -299,16 +301,16 @@ error_code cellVideoExportFromFile(vm::cptr<char> srcHddDir, vm::cptr<char> srcH
 		return { CELL_VIDEO_EXPORT_UTIL_ERROR_PARAM, file_path };
 	}
 
-	std::string filename = param->title.get_ptr();
+	std::string filename;
+
+	if (srcHddFile)
+	{
+		fmt::append(filename, "%s", srcHddFile.get_ptr());
+	}
 
 	if (filename.empty())
 	{
-		return { CELL_VIDEO_EXPORT_UTIL_ERROR_PARAM, "title empty" };
-	}
-
-	if (const std::string extension = get_file_extension(file_path); !extension.empty())
-	{
-		fmt::append(filename, ".%s", extension);
+		return { CELL_VIDEO_EXPORT_UTIL_ERROR_PARAM, "filename empty" };
 	}
 
 	sysutil_register_cb([=](ppu_thread& ppu) -> s32

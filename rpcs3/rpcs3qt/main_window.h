@@ -27,6 +27,7 @@ class emu_settings;
 class persistent_settings;
 class kernel_explorer;
 class system_cmd_dialog;
+class gui_pad_thread;
 
 struct gui_game_info;
 
@@ -94,13 +95,13 @@ public:
 Q_SIGNALS:
 	void RequestLanguageChange(const QString& language);
 	void RequestGlobalStylesheetChange();
-	void RequestTrophyManagerRepaint();
+	void RequestDialogRepaint();
 	void NotifyEmuSettingsChange();
 	void NotifyWindowCloseEvent(bool closed);
 
 public Q_SLOTS:
 	void OnEmuStop();
-	void OnEmuRun(bool start_playtime) const;
+	void OnEmuRun(bool start_playtime);
 	void OnEmuResume() const;
 	void OnEmuPause() const;
 	void OnEmuReady() const;
@@ -132,6 +133,7 @@ private Q_SLOTS:
 	void CreateFirmwareCache();
 
 	void handle_shortcut(gui::shortcuts::shortcut shortcut_key, const QKeySequence& key_sequence);
+	void update_gui_pad_thread();
 
 protected:
 	void closeEvent(QCloseEvent *event) override;
@@ -150,6 +152,7 @@ private:
 	void CreateDockWindows();
 	void EnableMenus(bool enabled) const;
 	void ShowTitleBars(bool show) const;
+	void ShowOptionalGamePreparations(const QString& title, const QString& message, std::map<std::string, QString> game_path);
 
 	static bool InstallFileInExData(const std::string& extension, const QString& path, const std::string& filename);
 
@@ -165,7 +168,7 @@ private:
 	u64 m_drop_file_timestamp = umax;
 	drop_type m_drop_file_cached_drop_type = drop_type::drop_error;
 	drop_type IsValidFile(const QMimeData& md, QStringList* drop_paths = nullptr);
-	static void AddGamesFromDir(const QString& path);
+	void AddGamesFromDirs(QStringList&& paths);
 
 	QAction* CreateRecentAction(const q_string_pair& entry, const uint& sc_idx);
 	void BootRecentAction(const QAction* act);
@@ -200,4 +203,6 @@ private:
 	QAction* m_download_menu_action = nullptr;
 
 	shortcut_handler* m_shortcut_handler = nullptr;
+
+	std::unique_ptr<gui_pad_thread> m_gui_pad_thread;
 };

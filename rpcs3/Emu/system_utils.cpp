@@ -3,6 +3,7 @@
 #include "system_config.h"
 #include "vfs_config.h"
 #include "Emu/Io/pad_config.h"
+#include "Emu/System.h"
 #include "util/sysinfo.hpp"
 #include "Utilities/File.h"
 #include "Utilities/StrUtil.h"
@@ -13,18 +14,6 @@
 
 #include <charconv>
 #include <thread>
-
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <unistd.h>
-#endif
-
-#ifdef __APPLE__
-#include <mach-o/dyld.h>
-#include <limits.h>
-#include <filesystem>
-#endif
 
 LOG_CHANNEL(sys_log, "SYS");
 
@@ -112,56 +101,6 @@ namespace rpcs3::utils
 		return worker();
 	}
 
-#ifdef _WIN32
-	std::string get_exe_dir()
-	{
-		wchar_t buffer[32767];
-		GetModuleFileNameW(nullptr, buffer, sizeof(buffer) / 2);
-
-		const std::string path_to_exe = wchar_to_utf8(buffer);
-		const usz last = path_to_exe.find_last_of('\\');
-		return last == std::string::npos ? std::string("") : path_to_exe.substr(0, last + 1);
-	}
-#elif defined(__APPLE__)
-	std::string get_app_bundle_path()
-	{
-		char bin_path[PATH_MAX];
-		uint32_t bin_path_size = sizeof(bin_path);
-		if (_NSGetExecutablePath(bin_path, &bin_path_size) != 0)
-		{
-			sys_log.error("Failed to find app binary path");
-			return {};
-		}
-
-		return std::filesystem::path(bin_path).parent_path().parent_path().parent_path();
-	}
-#else
-	std::string get_executable_path()
-	{
-		if (const char* appimage_path = ::getenv("APPIMAGE"))
-		{
-			sys_log.notice("Found AppImage path: %s", appimage_path);
-			return std::string(appimage_path);
-		}
-
-		sys_log.warning("Failed to find AppImage path");
-
-		char exe_path[PATH_MAX];
-		const ssize_t len = ::readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
-
-		if (len == -1)
-		{
-			sys_log.error("Failed to find executable path");
-			return {};
-		}
-
-		exe_path[len] = '\0';
-		sys_log.trace("Found exec path: %s", exe_path);
-
-		return std::string(exe_path);
-	}
-#endif
-
 	std::string get_emu_dir()
 	{
 		const std::string& emu_dir_ = g_cfg_vfs.emulator_dir;
@@ -181,6 +120,28 @@ namespace rpcs3::utils
 	std::string get_cache_dir()
 	{
 		return fs::get_cache_dir() + "cache/";
+	}
+
+	std::string get_cache_dir(std::string_view module_path)
+	{
+		std::string cache_dir = get_cache_dir();
+
+		const std::string dev_flash = g_cfg_vfs.get_dev_flash();
+		const bool in_dev_flash = Emu.IsPathInsideDir(module_path, dev_flash);
+
+		if (in_dev_flash && !Emu.IsPathInsideDir(module_path, dev_flash + "sys/external/"))
+		{
+			// Add prefix for vsh
+			cache_dir += "vsh/";
+		}
+		else if (!in_dev_flash && !Emu.GetTitleID().empty() && Emu.GetCat() != "1P")
+		{
+			// Add prefix for anything except dev_flash files, standalone elfs or PS1 classics
+			cache_dir += Emu.GetTitleID();
+			cache_dir += '/';
+		}
+
+		return cache_dir;
 	}
 
 	std::string get_rap_file_path(const std::string_view& rap)
@@ -262,7 +223,7 @@ namespace rpcs3::utils
 		}
 
 		// Decrypt EDAT and verify its contents
-		fs::file dec_file = DecryptEDAT(enc_file, edat_path, 8, reinterpret_cast<u8*>(&k_licensee), false);
+		fs::file dec_file = DecryptEDAT(enc_file, edat_path, 8, reinterpret_cast<u8*>(&k_licensee));
 		if (!dec_file)
 		{
 			sys_log.error("verify_c00_unlock_edat(): Failed to decrypt '%s'", edat_path);

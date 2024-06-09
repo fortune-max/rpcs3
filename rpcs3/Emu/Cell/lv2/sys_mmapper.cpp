@@ -50,7 +50,7 @@ lv2_memory::lv2_memory(utils::serial& ar)
 	, flags(ar)
 	, key(ar)
 	, pshared(ar)
-	, ct(lv2_memory_container::search(ar.operator u32()))
+	, ct(lv2_memory_container::search(ar.pop<u32>()))
 	, shm([&](u32 addr)
 	{
 		if (addr)
@@ -61,7 +61,7 @@ lv2_memory::lv2_memory(utils::serial& ar)
 		const auto _shm = std::make_shared<utils::shm>(size, 1);
 		ar(std::span(_shm->map_self(), size));
 		return _shm;
-	}(ar.operator u32()))
+	}(ar.pop<u32>()))
 	, counter(ar)
 {
 #ifndef _WIN32
@@ -74,6 +74,7 @@ CellError lv2_memory::on_id_create()
 {
 	if (!exists && !ct->take(size))
 	{
+		sys_mmapper.error("lv2_memory::on_id_create(): Cannot allocate 0x%x bytes (0x%x available)", size, ct->size - ct->used);
 		return CELL_ENOMEM;
 	}
 
@@ -850,7 +851,7 @@ error_code mmapper_thread_recover_page_fault(cpu_thread* cpu)
 
 		pf_events.events.erase(pf_event_ind);
 
-		if (cpu->id_type() == 1u)
+		if (cpu->get_class() == thread_class::ppu)
 		{
 			lv2_obj::awake(cpu);
 		}

@@ -40,7 +40,7 @@ namespace rsx
 
 			virtual ~overlay() = default;
 
-			virtual void update() {}
+			virtual void update(u64 /*timestamp_us*/) {}
 			virtual compiled_resource get_compiled() = 0;
 
 			void refresh() const;
@@ -57,7 +57,8 @@ namespace rsx
 				new_save = -1,
 				canceled = -2,
 				error = -3,
-				interrupted = -4
+				interrupted = -4,
+				no = -5
 			};
 
 			static constexpr u64 m_auto_repeat_ms_interval_default = 200;
@@ -122,7 +123,7 @@ namespace rsx
 			bool is_detached() const { return m_input_thread_detached; }
 			void detach_input() { m_input_thread_detached.store(true); }
 
-			void update() override {}
+			void update(u64 /*timestamp_us*/) override {}
 
 			compiled_resource get_compiled() override = 0;
 
@@ -132,6 +133,32 @@ namespace rsx
 			virtual void close(bool use_callback, bool stop_pad_interception);
 
 			s32 run_input_loop(std::function<bool()> check_state = nullptr);
+		};
+
+		struct text_guard_t
+		{
+			std::mutex mutex;
+			std::string text;
+			bool dirty{false};
+
+			void set_text(std::string t)
+			{
+				std::lock_guard lock(mutex);
+				text = std::move(t);
+				dirty = true;
+			}
+
+			std::pair<bool, std::string> get_text()
+			{
+				if (dirty)
+				{
+					std::lock_guard lock(mutex);
+					dirty = false;
+					return { true, std::move(text) };
+				}
+
+				return { false, {} };
+			}
 		};
 	}
 }

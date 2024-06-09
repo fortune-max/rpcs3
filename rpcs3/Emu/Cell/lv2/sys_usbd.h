@@ -2,6 +2,7 @@
 
 #include "Emu/Memory/vm_ptr.h"
 #include "Emu/Cell/ErrorCodes.h"
+#include "Input/product_info.h"
 
 class ppu_thread;
 
@@ -73,7 +74,7 @@ error_code sys_usbd_open_default_pipe(ppu_thread& ppu, u32 handle, u32 device_ha
 error_code sys_usbd_close_pipe(ppu_thread& ppu, u32 handle, u32 pipe_handle);
 error_code sys_usbd_receive_event(ppu_thread& ppu, u32 handle, vm::ptr<u64> arg1, vm::ptr<u64> arg2, vm::ptr<u64> arg3);
 error_code sys_usbd_detect_event(ppu_thread& ppu);
-error_code sys_usbd_attach(ppu_thread& ppu, u32 handle);
+error_code sys_usbd_attach(ppu_thread& ppu, u32 handle, u32 unk1, u32 unk2, u32 device_handle);
 error_code sys_usbd_transfer_data(ppu_thread& ppu, u32 handle, u32 id_pipe, vm::ptr<u8> buf, u32 buf_size, vm::ptr<UsbDeviceRequest> request, u32 type_transfer);
 error_code sys_usbd_isochronous_transfer_data(ppu_thread& ppu, u32 handle, u32 id_pipe, vm::ptr<UsbDeviceIsoRequest> iso_request);
 error_code sys_usbd_get_transfer_status(ppu_thread& ppu, u32 handle, u32 id_transfer, u32 unk1, vm::ptr<u32> result, vm::ptr<u32> count);
@@ -86,3 +87,5 @@ error_code sys_usbd_free_memory(ppu_thread& ppu);
 error_code sys_usbd_get_device_speed(ppu_thread& ppu);
 error_code sys_usbd_register_extra_ldd(ppu_thread& ppu, u32 handle, vm::cptr<char> s_product, u16 slen_product, u16 id_vendor, u16 id_product_min, u16 id_product_max);
 error_code sys_usbd_unregister_extra_ldd(ppu_thread& ppu, u32 handle, vm::cptr<char> s_product, u16 slen_product);
+
+void connect_usb_controller(u8 index, input::product_type);

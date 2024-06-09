@@ -10,13 +10,6 @@
 #include <QPushButton>
 #include <QCheckBox>
 #include <QSvgWidget>
-#include <QStyleHints>
-#include <QGuiApplication>
-
-static bool recommend_dark_theme()
-{
-	return QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark;
-}
 
 welcome_dialog::welcome_dialog(std::shared_ptr<gui_settings> gui_settings, bool is_manual_show, QWidget* parent)
 	: QDialog(parent)
@@ -33,13 +26,13 @@ welcome_dialog::welcome_dialog(std::shared_ptr<gui_settings> gui_settings, bool 
 	ui->i_have_read->setEnabled(!is_manual_show);
 	ui->do_not_show->setEnabled(!is_manual_show);
 	ui->do_not_show->setChecked(!m_gui_settings->GetValue(gui::ib_show_welcome).toBool());
-	ui->use_dark_theme->setChecked(recommend_dark_theme());
+	ui->use_dark_theme->setChecked(gui::utils::dark_mode_active());
 	ui->icon_label->load(QStringLiteral(":/rpcs3.svg"));
 	ui->label_3->setText(tr(
 		R"(
 			<p style="white-space: nowrap;">
 				RPCS3 is an open-source Sony PlayStation 3 emulator and debugger.<br>
-				It is written in C++ for Windows, Linux, FreeBSD and MacOS funded with <a %0 href="https://www.patreon.com/Nekotekina">Patreon</a>.<br>
+				It is written in C++ for Windows, Linux, FreeBSD and MacOS funded with <a %0 href="https://rpcs3.net/patreon">Patreon</a>.<br>
 				Our developers and contributors are always working hard to ensure this project is the best that it can be.<br>
 				There are still plenty of implementations to make and optimizations to do.
 			</p>

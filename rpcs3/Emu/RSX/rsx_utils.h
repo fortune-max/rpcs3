@@ -162,6 +162,7 @@ namespace rsx
 		u32 resolution_x = 1280;   // X RES
 		u32 resolution_y = 720;    // Y RES
 		atomic_t<u32> state = 0;   // 1 after cellVideoOutConfigure was called
+		u8 scan_mode = 1;          // CELL_VIDEO_OUT_SCAN_MODE_PROGRESSIVE
 
 		ENABLE_BITWISE_SERIALIZATION;
 		SAVESTATE_INIT_POS(12);
@@ -188,8 +189,10 @@ namespace rsx
 		u16 width;
 		u16 height;
 		u32 pitch;
+		u8  bpp;
+		u32 dma;
 		u32 rsx_address;
-		void *pixels;
+		u8 *pixels;
 	};
 
 	struct blit_dst_info
@@ -206,8 +209,10 @@ namespace rsx
 		f32 scale_x;
 		f32 scale_y;
 		u32 pitch;
+		u8  bpp;
+		u32 dma;
 		u32 rsx_address;
-		void *pixels;
+		u8 *pixels;
 		bool swizzled;
 	};
 
@@ -300,6 +305,13 @@ namespace rsx
 	static inline T align2(T value, U alignment)
 	{
 		return ((value + alignment - 1) / alignment) * alignment;
+	}
+
+	// General purpose downward alignment without power-of-2 constraint
+	template <typename T, typename U>
+	static inline T align_down2(T value, U alignment)
+	{
+		return (value / alignment) * alignment;
 	}
 
 	// Copy memory in inverse direction from source
@@ -864,6 +876,38 @@ namespace rsx
 		result.r = ((colorref >> 16) & 0xFF) / 255.f;
 		result.a = ((colorref >> 24) & 0xFF) / 255.f;
 		return result;
+	}
+
+	static inline const std::array<bool, 4> get_write_output_mask(rsx::surface_color_format format)
+	{
+		constexpr std::array<bool, 4> rgba = { true, true, true, true };
+		constexpr std::array<bool, 4> rgb = { true, true, true, false };
+		constexpr std::array<bool, 4> rg = { true, true, false, false };
+		constexpr std::array<bool, 4> r = { true, false, false, false };
+
+		switch (format)
+		{
+		case rsx::surface_color_format::a8r8g8b8:
+		case rsx::surface_color_format::a8b8g8r8:
+		case rsx::surface_color_format::w16z16y16x16:
+		case rsx::surface_color_format::w32z32y32x32:
+			return rgba;
+		case rsx::surface_color_format::x1r5g5b5_z1r5g5b5:
+		case rsx::surface_color_format::x1r5g5b5_o1r5g5b5:
+		case rsx::surface_color_format::r5g6b5:
+		case rsx::surface_color_format::x8r8g8b8_z8r8g8b8:
+		case rsx::surface_color_format::x8r8g8b8_o8r8g8b8:
+		case rsx::surface_color_format::x8b8g8r8_z8b8g8r8:
+		case rsx::surface_color_format::x8b8g8r8_o8b8g8r8:
+			return rgb;
+		case rsx::surface_color_format::g8b8:
+			return rg;
+		case rsx::surface_color_format::b8:
+		case rsx::surface_color_format::x32:
+			return r;
+		default:
+			fmt::throw_exception("Unknown surface format 0x%x", static_cast<int>(format));
+		}
 	}
 
 	template <uint integer, uint frac, bool sign = true, typename To = f32>

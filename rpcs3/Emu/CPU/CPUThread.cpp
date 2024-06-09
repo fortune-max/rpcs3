@@ -89,6 +89,9 @@ struct cpu_prof
 		// Total number of samples
 		u64 samples = 0, idle = 0;
 
+		// Total number of sample collected in reservation operation
+		u64 reservation_samples = 0;
+
 		// Avoid printing replicas or when not much changed
 		u64 new_samples = 0;
 
@@ -101,6 +104,7 @@ struct cpu_prof
 			samples = 0;
 			idle = 0;
 			new_samples = 0;
+			reservation_samples = 0;
 		}
 
 		static std::string format(const std::multimap<u64, u64, std::greater<u64>>& chart, u64 samples, u64 idle, bool extended_print = false)
@@ -133,6 +137,21 @@ struct cpu_prof
 			return results;
 		}
 
+		static f64 get_percent(u64 dividend, u64 divisor)
+		{
+			if (!dividend)
+			{
+				return 0;
+			}
+
+			if (dividend >= divisor)
+			{
+				return 100;
+			}
+
+			return 100. * dividend / divisor;
+		}
+
 		// Print info
 		void print(const std::shared_ptr<cpu_thread>& ptr)
 		{
@@ -140,7 +159,7 @@ struct cpu_prof
 			{
 				if (cpu_flag::exit - ptr->state)
 				{
-					profiler.notice("Thread \"%s\" [0x%08x]: %u samples, %u new (%.4f%% idle): Not enough new samples have been collected since the last print.", ptr->get_name(), ptr->id, samples, new_samples, 100. * idle / samples);
+					profiler.notice("Thread \"%s\" [0x%08x]: %u samples (%.4f%% idle), %u new, %u reservation (%.4f%%): Not enough new samples have been collected since the last print.", ptr->get_name(), ptr->id, samples, get_percent(idle, samples), new_samples, reservation_samples, get_percent(reservation_samples, samples - idle));
 				}
 
 				return;
@@ -156,7 +175,7 @@ struct cpu_prof
 
 			// Print results
 			const std::string results = format(chart, samples, idle);
-			profiler.notice("Thread \"%s\" [0x%08x]: %u samples, %u new (%.4f%% idle):%s", ptr->get_name(), ptr->id, samples, new_samples, 100. * idle / samples, results);
+			profiler.notice("Thread \"%s\" [0x%08x]: %u samples (%.4f%% idle), %u new, %u reservation (%.4f%%):\n%s", ptr->get_name(), ptr->id, samples, get_percent(idle, samples), new_samples, reservation_samples, get_percent(reservation_samples, samples - idle), results);
 
 			new_samples = 0;
 		}
@@ -177,6 +196,7 @@ struct cpu_prof
 			std::unordered_map<u64, u64, value_hash<u64>> freq;
 
 			u64 samples = 0, idle = 0;
+			u64 reservation = 0;
 
 			for (auto& [_, info] : threads)
 			{
@@ -188,6 +208,7 @@ struct cpu_prof
 
 				samples += info.samples;
 				idle += info.idle;
+				reservation += info.reservation_samples;
 			}
 
 			if (samples == idle)
@@ -197,7 +218,7 @@ struct cpu_prof
 
 			if (new_samples < min_print_all_samples && thread_ctrl::state() != thread_state::aborting)
 			{
-				profiler.notice("All Threads: %u samples, %u new (%.4f%% idle): Not enough new samples have been collected since the last print.", samples, new_samples, 100. * idle / samples);
+				profiler.notice("All Threads: %u samples (%.4f%% idle), %u new, %u reservation (%.4f%%): Not enough new samples have been collected since the last print.", samples, get_percent(idle, samples), new_samples, reservation, get_percent(reservation, samples - idle));
 				return;
 			}
 
@@ -207,7 +228,7 @@ struct cpu_prof
 			}
 
 			const std::string results = format(chart, samples, idle, true);
-			profiler.notice("All Threads: %u samples, %u new (%.4f%% idle):%s", samples, new_samples, 100. * idle / samples, results);
+			profiler.notice("All Threads: %u samples (%.4f%% idle), %u new, %u reservation (%.4f%%):%s", samples, get_percent(idle, samples), new_samples, reservation, get_percent(reservation, samples - idle), results);
 		}
 	};
 
@@ -281,6 +302,14 @@ struct cpu_prof
 						info.freq[name]++;
 						info.new_samples++;
 
+						if (auto spu = ptr->try_get<spu_thread>())
+						{
+							if (spu->raddr)
+							{
+								info.reservation_samples++;
+							}
+						}
+
 						// Append verification time to fixed common name 0000000...chunk-0x3fffc
 						if (name >> 16 && (name & 0xffff) == 0)
 							info.freq[0xffff]++;
@@ -312,6 +341,13 @@ struct cpu_prof
 			if (Emu.IsPaused())
 			{
 				thread_ctrl::wait_for(5000);
+				continue;
+			}
+
+			if (!g_cfg.core.spu_debug)
+			{
+				// Reduce accuracy in favor of performance when enabled alone
+				thread_ctrl::wait_for(60, false);
 				continue;
 			}
 
@@ -352,10 +388,10 @@ namespace cpu_counter
 {
 	void add(cpu_thread* _this) noexcept
 	{
-		switch (_this->id_type())
+		switch (_this->get_class())
 		{
-		case 1:
-		case 2:
+		case thread_class::ppu:
+		case thread_class::spu:
 			break;
 		default: return;
 		}
@@ -485,7 +521,7 @@ void cpu_thread::operator()()
 
 	if (g_cfg.core.thread_scheduler != thread_scheduler_mode::os)
 	{
-		thread_ctrl::set_thread_affinity_mask(thread_ctrl::get_affinity_mask(id_type() == 1 ? thread_class::ppu : thread_class::spu));
+		thread_ctrl::set_thread_affinity_mask(thread_ctrl::get_affinity_mask(get_class()));
 	}
 
 	while (!g_fxo->is_init<cpu_profiler>())
@@ -499,14 +535,14 @@ void cpu_thread::operator()()
 		thread_ctrl::wait_for(1000);
 	}
 
-	switch (id_type())
+	switch (get_class())
 	{
-	case 1:
+	case thread_class::ppu:
 	{
 		//g_fxo->get<cpu_profiler>().registered.push(id);
 		break;
 	}
-	case 2:
+	case thread_class::spu:
 	{
 		if (g_cfg.core.spu_prof)
 		{
@@ -521,7 +557,7 @@ void cpu_thread::operator()()
 	// Register thread in g_cpu_array
 	s_cpu_counter++;
 
-	atomic_wait_engine::set_notify_callback(g_use_rtm || id_type() != 1 /* PPU */ ? nullptr : +[](const void*, u64 progress)
+	atomic_wait_engine::set_notify_callback(g_use_rtm || get_class() != thread_class::ppu ? nullptr : +[](const void*, u64 progress)
 	{
 		static thread_local bool wait_set = false;
 
@@ -952,7 +988,7 @@ bool cpu_thread::check_state() noexcept
 				continue;
 			}
 
-			if (state0 & cpu_flag::yield && cpu_flag::wait - state0 && cpu_can_stop)
+			if (state0 & cpu_flag::yield && cpu_can_stop)
 			{
 				if (auto spu = try_get<spu_thread>())
 				{
@@ -964,6 +1000,14 @@ bool cpu_thread::check_state() noexcept
 				}
 				else if (auto ppu = try_get<ppu_thread>())
 				{
+					if (u32 usec = ppu->hw_sleep_time)
+					{
+						thread_ctrl::wait_for_accurate(usec);
+						ppu->hw_sleep_time = 0;
+						ppu->raddr = 0; // Also lose reservation if there is any (reservation is unsaved on hw thread switch)
+						continue;
+					}
+
 					if (ppu->raddr && ppu->rtime == vm::reservation_acquire(ppu->raddr))
 					{
 						// Same
@@ -983,17 +1027,26 @@ void cpu_thread::notify()
 	state.notify_one();
 
 	// Downcast to correct type
-	if (id_type() == 1)
+	switch (get_class())
+	{
+	case thread_class::ppu:
 	{
 		thread_ctrl::notify(*static_cast<named_thread<ppu_thread>*>(this));
+		break;
 	}
-	else if (id_type() == 2)
+	case thread_class::spu:
 	{
 		thread_ctrl::notify(*static_cast<named_thread<spu_thread>*>(this));
+		break;
 	}
-	else if (id_type() != 0x55)
+	case thread_class::rsx:
+	{
+		break;
+	}
+	default:
 	{
 		fmt::throw_exception("Invalid cpu_thread type");
+	}
 	}
 }
 
@@ -1023,39 +1076,91 @@ cpu_thread& cpu_thread::operator=(thread_state)
 	return *this;
 }
 
+void cpu_thread::add_remove_flags(bs_t<cpu_flag> to_add, bs_t<cpu_flag> to_remove)
+{
+	bs_t<cpu_flag> result{};
+
+	if (!to_remove)
+	{
+		state.add_fetch(to_add);
+		return;
+	}
+	else if (!to_add)
+	{
+		result = state.sub_fetch(to_remove);
+	}
+	else
+	{
+		result = state.atomic_op([&](bs_t<cpu_flag>& v)
+		{
+			v += to_add;
+			v -= to_remove;
+			return v;
+		});
+	}
+
+	if (!::is_paused(to_remove) && !::is_stopped(to_remove))
+	{
+		// No notable change requiring notification
+		return;
+	}
+
+	if (::is_paused(result) || ::is_stopped(result))
+	{
+		// Flags that stop thread execution
+		return;
+	}
+
+	state.notify_one();
+}
+
 std::string cpu_thread::get_name() const
 {
 	// Downcast to correct type
-	if (id_type() == 1)
+	switch (get_class())
+	{
+	case thread_class::ppu:
 	{
 		return thread_ctrl::get_name(*static_cast<const named_thread<ppu_thread>*>(this));
 	}
-
-	if (id_type() == 2)
+	case thread_class::spu:
 	{
 		return thread_ctrl::get_name(*static_cast<const named_thread<spu_thread>*>(this));
 	}
+	default:
+	{
+		if (cpu_thread::get_current() == this && thread_ctrl::get_current())
+		{
+			return thread_ctrl::get_name();
+		}
 
-	fmt::throw_exception("Invalid cpu_thread type");
+		if (get_class() == thread_class::rsx)
+		{
+			return fmt::format("rsx::thread");
+		}
+
+		return fmt::format("Invalid cpu_thread type (0x%x)", id_type());
+	}
+	}
 }
 
 u32 cpu_thread::get_pc() const
 {
 	const u32* pc = nullptr;
 
-	switch (id_type())
+	switch (get_class())
 	{
-	case 1:
+	case thread_class::ppu:
 	{
 		pc = &static_cast<const ppu_thread*>(this)->cia;
 		break;
 	}
-	case 2:
+	case thread_class::spu:
 	{
 		pc = &static_cast<const spu_thread*>(this)->pc;
 		break;
 	}
-	case 0x55:
+	case thread_class::rsx:
 	{
 		const auto ctrl = static_cast<const rsx::thread*>(this)->ctrl;
 		return ctrl ? ctrl->get.load() : umax;
@@ -1068,17 +1173,17 @@ u32 cpu_thread::get_pc() const
 
 u32* cpu_thread::get_pc2()
 {
-	switch (id_type())
+	switch (get_class())
 	{
-	case 1:
+	case thread_class::ppu:
 	{
 		return &static_cast<ppu_thread*>(this)->dbg_step_pc;
 	}
-	case 2:
+	case thread_class::spu:
 	{
 		return &static_cast<spu_thread*>(this)->dbg_step_pc;
 	}
-	case 0x55:
+	case thread_class::rsx:
 	{
 		const auto ctrl = static_cast<rsx::thread*>(this)->ctrl;
 		return ctrl ? &static_cast<rsx::thread*>(this)->dbg_step_pc : nullptr;
@@ -1091,13 +1196,13 @@ u32* cpu_thread::get_pc2()
 
 cpu_thread* cpu_thread::get_next_cpu()
 {
-	switch (id_type())
+	switch (get_class())
 	{
-	case 1:
+	case thread_class::ppu:
 	{
 		return static_cast<ppu_thread*>(this)->next_cpu;
 	}
-	case 2:
+	case thread_class::spu:
 	{
 		return static_cast<spu_thread*>(this)->next_cpu;
 	}
@@ -1163,7 +1268,7 @@ std::vector<std::pair<u32, u32>> cpu_thread::dump_callstack_list() const
 
 std::string cpu_thread::dump_misc() const
 {
-	return fmt::format("Type: %s; State: %s\n", id_type() == 1 ? "PPU" : id_type() == 2 ? "SPU" : "RSX", state.load());
+	return fmt::format("Type: %s; State: %s\n", get_class() == thread_class::ppu ? "PPU" : get_class() == thread_class::spu ? "SPU" : "RSX", state.load());
 }
 
 bool cpu_thread::suspend_work::push(cpu_thread* _this) noexcept
@@ -1363,9 +1468,14 @@ u32 CPUDisAsm::DisAsmBranchTarget(s32 /*imm*/)
 	return 0;
 }
 
-extern bool try_lock_spu_threads_in_a_state_compatible_with_savestates(bool revert_lock)
+extern bool try_lock_spu_threads_in_a_state_compatible_with_savestates(bool revert_lock, std::vector<std::pair<std::shared_ptr<named_thread<spu_thread>>, u32>>* out_list)
 {
-	auto get_spus = [old_counter = u64{umax}, spu_list = std::vector<std::shared_ptr<named_thread<spu_thread>>>()](bool can_collect) mutable
+	if (out_list)
+	{
+		out_list->clear();
+	}
+
+	auto get_spus = [old_counter = u64{umax}, spu_list = std::vector<std::shared_ptr<named_thread<spu_thread>>>()](bool can_collect, bool force_collect) mutable
 	{
 		const u64 new_counter = cpu_thread::g_threads_created + cpu_thread::g_threads_deleted;
 
@@ -1376,13 +1486,33 @@ extern bool try_lock_spu_threads_in_a_state_compatible_with_savestates(bool reve
 				return decltype(&spu_list){};
 			}
 
+			const u64 current = get_system_time();
+
 			// Fetch SPU contexts
 			spu_list.clear();
 
-			idm::select<named_thread<spu_thread>>([&](u32 id, spu_thread&)
+			bool give_up = false;
+
+			idm::select<named_thread<spu_thread>>([&](u32 id, spu_thread& spu)
 			{
 				spu_list.emplace_back(ensure(idm::get_unlocked<named_thread<spu_thread>>(id)));
+
+				if (spu.current_func && spu.unsavable)
+				{
+					const u64 start = spu.start_time;
+
+					// Automatically give up if it is asleep 15 seconds or more
+					if (start && current > start && current - start >= 15'000'000)
+					{
+						give_up = true;
+					}
+				}
 			});
+
+			if (!force_collect && give_up)
+			{
+				return decltype(&spu_list){};
+			}
 
 			old_counter = new_counter;
 		}
@@ -1391,7 +1521,7 @@ extern bool try_lock_spu_threads_in_a_state_compatible_with_savestates(bool reve
 	};
 
 	// Attempt to lock for a second, if somehow takes longer abort it
-	for (u64 start = 0, passed_count = 0; passed_count < 10;)
+	for (u64 start = 0, passed_count = 0; passed_count < 15;)
 	{
 		if (revert_lock)
 		{
@@ -1403,7 +1533,7 @@ extern bool try_lock_spu_threads_in_a_state_compatible_with_savestates(bool reve
 		{
 			start = get_system_time();
 		}
-		else if (get_system_time() - start >= 100'000)
+		else if (get_system_time() - start >= 150'000)
 		{
 			passed_count++;
 			start = 0;
@@ -1411,7 +1541,16 @@ extern bool try_lock_spu_threads_in_a_state_compatible_with_savestates(bool reve
 		}
 
 		// Try to fetch SPUs out of critical section
-		const auto spu_list = get_spus(true);
+		const auto spu_list = get_spus(true, false);
+
+		if (!spu_list)
+		{
+			// Give up for now
+			std::this_thread::sleep_for(10ms);
+			passed_count++;
+			start = 0;
+			continue;
+		}
 
 		// Avoid using suspend_all when more than 2 threads known to be unsavable
 		u32 unsavable_threads = 0;
@@ -1440,7 +1579,7 @@ extern bool try_lock_spu_threads_in_a_state_compatible_with_savestates(bool reve
 
 		if (cpu_thread::suspend_all(nullptr, {}, [&]()
 		{
-			if (!get_spus(false))
+			if (!get_spus(false, true))
 			{
 				// Avoid locking IDM here because this is a critical section
 				return true;
@@ -1509,10 +1648,18 @@ extern bool try_lock_spu_threads_in_a_state_compatible_with_savestates(bool reve
 			continue;
 		}
 
+		if (out_list)
+		{
+			for (auto& spu : *spu_list)
+			{
+				out_list->emplace_back(spu, spu->pc);
+			}
+		}
+
 		return true;
 	}
 
-	for (auto& spu : *get_spus(true))
+	for (auto& spu : *get_spus(true, true))
 	{
 		if (spu->state.test_and_reset(cpu_flag::dbg_global_pause))
 		{

@@ -2,6 +2,7 @@
 
 #include "util/types.hpp"
 #include "util/atomic.hpp"
+#include "util/shared_ptr.hpp"
 #include "Utilities/bit_set.h"
 #include "config_mode.h"
 #include "games_config.h"
@@ -17,6 +18,11 @@ void init_fxo_for_exec(utils::serial*, bool);
 
 enum class localized_string_id;
 enum class video_renderer;
+
+class spu_thread;
+
+template <typename T>
+class named_thread;
 
 enum class system_state : u32
 {
@@ -45,6 +51,7 @@ enum class game_boot_result : u32
 	savestate_corrupted,
 	savestate_version_unsupported,
 	still_running,
+	already_added,
 };
 
 constexpr bool is_error(game_boot_result res)
@@ -62,6 +69,7 @@ struct EmuCallbacks
 	std::function<void()> on_ready;
 	std::function<bool()> on_missing_fw;
 	std::function<void(std::shared_ptr<atomic_t<bool>>, int)> on_emulation_stop_no_response;
+	std::function<void(std::shared_ptr<atomic_t<bool>>, stx::shared_ptr<utils::serial>, stx::atomic_ptr<std::string>*, std::shared_ptr<void>)> on_save_state_progress;
 	std::function<void(bool enabled)> enable_disc_eject;
 	std::function<void(bool enabled)> enable_disc_insert;
 	std::function<bool(bool, std::function<void()>)> try_to_quit; // (force_quit, on_exit) Try to close RPCS3
@@ -108,7 +116,7 @@ class Emulator final
 	atomic_t<u64> m_pause_start_time{0}; // set when paused
 	atomic_t<u64> m_pause_amend_time{0}; // increased when resumed
 	atomic_t<u64> m_stop_ctr{1}; // Increments when emulation is stopped
-	atomic_t<bool> m_savestate_pending = false;
+	atomic_t<bool> m_emu_state_close_pending = false;
 
 	games_config m_games_config;
 
@@ -145,11 +153,11 @@ class Emulator final
 
 	std::vector<std::shared_ptr<atomic_t<u32>>> m_pause_msgs_refs;
 
-	std::vector<std::function<void()>> deferred_deserialization;
+	std::vector<std::function<void()>> m_postponed_init_code;
 
-	void ExecDeserializationRemnants()
+	void ExecPostponedInitCode()
 	{
-		for (auto&& func : ::as_rvalue(std::move(deferred_deserialization)))
+		for (auto&& func : ::as_rvalue(std::move(m_postponed_init_code)))
 		{
 			func();
 		}
@@ -182,10 +190,11 @@ public:
 	}
 
 	// Call from the GUI thread
-	void CallFromMainThread(std::function<void()>&& func, atomic_t<u32>* wake_up = nullptr, bool track_emu_state = true, u64 stop_ctr = umax) const;
+	void CallFromMainThread(std::function<void()>&& func, atomic_t<u32>* wake_up = nullptr, bool track_emu_state = true, u64 stop_ctr = umax,
+		std::source_location src_loc = std::source_location::current()) const;
 
 	// Blocking call from the GUI thread
-	void BlockingCallFromMainThread(std::function<void()>&& func) const;
+	void BlockingCallFromMainThread(std::function<void()>&& func, std::source_location src_loc = std::source_location::current()) const;
 
 	enum class stop_counter_t : u64{};
 
@@ -195,14 +204,15 @@ public:
 		return stop_counter_t{+m_stop_ctr};
 	}
 
-	void CallFromMainThread(std::function<void()>&& func, stop_counter_t counter) const
+	void CallFromMainThread(std::function<void()>&& func, stop_counter_t counter,
+		std::source_location src_loc = std::source_location::current()) const
 	{
-		CallFromMainThread(std::move(func), nullptr, true, static_cast<u64>(counter));
+		CallFromMainThread(std::move(func), nullptr, true, static_cast<u64>(counter), src_loc);
 	}
 
-	void DeferDeserialization(std::function<void()>&& func)
+	void PostponeInitCode(std::function<void()>&& func)
 	{
-		deferred_deserialization.emplace_back(std::move(func));
+		m_postponed_init_code.emplace_back(std::move(func));
 	}
 
 	/** Set emulator mode to running unconditionnaly.
@@ -336,6 +346,7 @@ private:
 	struct savestate_stage
 	{
 		bool prepared = false;
+		std::vector<std::pair<std::shared_ptr<named_thread<spu_thread>>, u32>> paused_spus;
 	};
 public:
 
@@ -362,10 +373,10 @@ public:
 
 	std::string GetFormattedTitle(double fps) const;
 
-	void ConfigurePPUCache(bool with_title_id = true) const;
+	void ConfigurePPUCache() const;
 
 	std::set<std::string> GetGameDirs() const;
-	void AddGamesFromDir(const std::string& path);
+	u32 AddGamesFromDir(const std::string& path);
 	game_boot_result AddGame(const std::string& path);
 	game_boot_result AddGameToYml(const std::string& path);
 

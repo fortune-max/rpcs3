@@ -91,7 +91,7 @@ bool emu_settings::Init()
 	return true;
 }
 
-void emu_settings::LoadSettings(const std::string& title_id)
+void emu_settings::LoadSettings(const std::string& title_id, bool create_config_from_global)
 {
 	m_title_id = title_id;
 
@@ -113,21 +113,25 @@ void emu_settings::LoadSettings(const std::string& title_id)
 			.arg(QString::fromStdString(default_error)), QMessageBox::Ok);
 	}
 
-	// Add global config
-	const std::string global_config_path = fs::get_config_dir() + "config.yml";
-	fs::file config(global_config_path, fs::read + fs::write + fs::create);
-	auto [global_config, global_error] = yaml_load(config.to_string());
-	config.close();
+	if (create_config_from_global)
+	{
+		// Add global config
+		const std::string global_config_path = fs::get_config_dir() + "config.yml";
+		fs::g_tls_error = fs::error::ok;
+		fs::file config(global_config_path, fs::read + fs::create);
+		auto [global_config, global_error] = yaml_load(config ? config.to_string() : "");
 
-	if (global_error.empty())
-	{
-		m_current_settings += global_config;
-	}
-	else
-	{
-		cfg_log.fatal("Failed to load global config %s:\n%s", global_config_path, global_error);
-		QMessageBox::critical(nullptr, tr("Config Error"), tr("Failed to load global config:\nFile: %0\nError: %1")
-			.arg(QString::fromStdString(global_config_path)).arg(QString::fromStdString(global_error)), QMessageBox::Ok);
+		if (config && global_error.empty())
+		{
+			m_current_settings += global_config;
+		}
+		else
+		{
+			config.close();
+			cfg_log.fatal("Failed to load global config %s:\n%s (%s)", global_config_path, global_error, fs::g_tls_error);
+			QMessageBox::critical(nullptr, tr("Config Error"), tr("Failed to load global config:\nFile: %0\nError: %1")
+				.arg(QString::fromStdString(global_config_path)).arg(QString::fromStdString(global_error)), QMessageBox::Ok);
+		}
 	}
 
 	// Add game config
@@ -146,7 +150,7 @@ void emu_settings::LoadSettings(const std::string& title_id)
 
 		if (!custom_config_path.empty())
 		{
-			if ((config = fs::file(custom_config_path, fs::read + fs::write)))
+			if (fs::file config{custom_config_path})
 			{
 				auto [custom_config, custom_error] = yaml_load(config.to_string());
 				config.close();
@@ -161,6 +165,12 @@ void emu_settings::LoadSettings(const std::string& title_id)
 					QMessageBox::critical(nullptr, tr("Config Error"), tr("Failed to load custom config:\nFile: %0\nError: %1")
 						.arg(QString::fromStdString(custom_config_path)).arg(QString::fromStdString(custom_error)), QMessageBox::Ok);
 				}
+			}
+			else if (fs::g_tls_error != fs::error::noent)
+			{
+				cfg_log.fatal("Failed to load custom config %s (file error: %s)", custom_config_path, fs::g_tls_error);
+					QMessageBox::critical(nullptr, tr("Config Error"), tr("Failed to load custom config:\nFile: %0\nError: %1")
+						.arg(QString::fromStdString(custom_config_path)).arg(QString::fromStdString(fmt::format("%s", fs::g_tls_error))), QMessageBox::Ok);
 			}
 		}
 	}
@@ -732,7 +742,12 @@ void emu_settings::EnhanceLineEdit(QLineEdit* edit, emu_settings_type type)
 
 	connect(edit, &QLineEdit::textChanged, this, [type, this](const QString &text)
 	{
-		SetSetting(type, sstr(text));
+		const QString trimmed = text.trimmed();
+		if (trimmed.size() != text.size())
+		{
+			cfg_log.warning("EnhanceLineEdit '%s' input was trimmed", cfg_adapter::get_setting_name(type));
+		}
+		SetSetting(type, sstr(trimmed));
 	});
 
 	connect(this, &emu_settings::RestoreDefaultsSignal, edit, [this, edit, type]()
@@ -994,6 +1009,7 @@ QString emu_settings::GetLocalizedSetting(const QString& original, emu_settings_
 		{
 		case mouse_handler::null: return tr("Null", "Mouse handler");
 		case mouse_handler::basic: return tr("Basic", "Mouse handler");
+		case mouse_handler::raw: return tr("Raw", "Mouse handler");
 		}
 		break;
 	case emu_settings_type::CameraType:
@@ -1042,6 +1058,7 @@ QString emu_settings::GetLocalizedSetting(const QString& original, emu_settings_
 		case move_handler::null: return tr("Null", "Move handler");
 		case move_handler::fake: return tr("Fake", "Move handler");
 		case move_handler::mouse: return tr("Mouse", "Move handler");
+		case move_handler::raw_mouse: return tr("Raw Mouse", "Move handler");
 #ifdef HAVE_LIBEVDEV
 		case move_handler::gun: return tr("Gun", "Gun handler");
 #endif
@@ -1069,6 +1086,13 @@ QString emu_settings::GetLocalizedSetting(const QString& original, emu_settings_
 		case ghltar_handler::null: return tr("Null", "GHLtar handler");
 		case ghltar_handler::one_controller: return tr("1 controller", "GHLtar handler");
 		case ghltar_handler::two_controllers: return tr("2 controllers", "GHLtar handler");
+		}
+		break;
+	case emu_settings_type::GameTablet:
+		switch (static_cast<gametablet_handler>(index))
+		{
+		case gametablet_handler::disabled: return tr("Disabled", "GameTablet handler");
+		case gametablet_handler::enabled: return tr("Enabled", "GameTablet handler");
 		}
 		break;
 	case emu_settings_type::InternetStatus:
@@ -1183,6 +1207,19 @@ QString emu_settings::GetLocalizedSetting(const QString& original, emu_settings_
 		case audio_avport::spdif_1: return tr("SPDIF 1", "Audio Avport");
 		}
 		break;
+	case emu_settings_type::AudioChannelLayout:
+		switch (static_cast<audio_channel_layout>(index))
+		{
+		case audio_channel_layout::automatic:        return tr("Auto", "Audio Channel Layout");
+		case audio_channel_layout::mono:             return tr("Mono", "Audio Channel Layout");
+		case audio_channel_layout::stereo:           return tr("Stereo", "Audio Channel Layout");
+		case audio_channel_layout::stereo_lfe:       return tr("Stereo LFE", "Audio Channel Layout");
+		case audio_channel_layout::quadraphonic:     return tr("Quadraphonic", "Audio Channel Layout");
+		case audio_channel_layout::quadraphonic_lfe: return tr("Quadraphonic LFE", "Audio Channel Layout");
+		case audio_channel_layout::surround_5_1:     return tr("Surround 5.1", "Audio Channel Layout");
+		case audio_channel_layout::surround_7_1:     return tr("Surround 7.1", "Audio Channel Layout");
+		}
+		break;
 	case emu_settings_type::LicenseArea:
 		switch (static_cast<CellSysutilLicenseArea>(index))
 		{
@@ -1228,6 +1265,7 @@ QString emu_settings::GetLocalizedSetting(const QString& original, emu_settings_
 		default:
 			break;
 		}
+		break;
 	case emu_settings_type::KeyboardType:
 		switch (static_cast<CellKbMappingType>(index))
 		{
@@ -1270,9 +1308,15 @@ QString emu_settings::GetLocalizedSetting(const QString& original, emu_settings_
 		switch (static_cast<stereo_render_mode_options>(index))
 		{
 		case stereo_render_mode_options::disabled: return tr("Disabled", "3D Display Mode");
-		case stereo_render_mode_options::anaglyph: return tr("Anaglyph", "3D Display Mode");
 		case stereo_render_mode_options::side_by_side: return tr("Side-by-side", "3D Display Mode");
 		case stereo_render_mode_options::over_under: return tr("Over-under", "3D Display Mode");
+		case stereo_render_mode_options::interlaced: return tr("Interlaced", "3D Display Mode");
+		case stereo_render_mode_options::anaglyph_red_green: return tr("Anaglyph Red-Green", "3D Display Mode");
+		case stereo_render_mode_options::anaglyph_red_blue: return tr("Anaglyph Red-Blue", "3D Display Mode");
+		case stereo_render_mode_options::anaglyph_red_cyan: return tr("Anaglyph Red-Cyan", "3D Display Mode");
+		case stereo_render_mode_options::anaglyph_magenta_cyan: return tr("Anaglyph Magenta-Cyan", "3D Display Mode");
+		case stereo_render_mode_options::anaglyph_trioscopic: return tr("Anaglyph Green-Magenta (Trioscopic)", "3D Display Mode");
+		case stereo_render_mode_options::anaglyph_amber_blue: return tr("Anaglyph Amber-Blue (ColorCode 3D)", "3D Display Mode");
 		}
 		break;
 	case emu_settings_type::MidiDevices:
@@ -1281,6 +1325,7 @@ QString emu_settings::GetLocalizedSetting(const QString& original, emu_settings_
 		case midi_device_type::guitar: return tr("Guitar (17 frets)", "Midi Device Type");
 		case midi_device_type::guitar_22fret: return tr("Guitar (22 frets)", "Midi Device Type");
 		case midi_device_type::keyboard: return tr("Keyboard", "Midi Device Type");
+		case midi_device_type::drums: return tr("Drums", "Midi Device Type");
 		}
 		break;
 	case emu_settings_type::XFloatAccuracy:

@@ -3,10 +3,6 @@
 #include "util/logs.hpp"
 #include "Emu/system_config.h"
 
-#ifdef __APPLE__
-#include <MoltenVK/mvk_config.h>
-#endif
-
 namespace vk
 {
 	// Global shared render device
@@ -43,13 +39,6 @@ namespace vk
 			{
 				shader_support_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT16_INT8_FEATURES_KHR;
 				features2.pNext           = &shader_support_info;
-			}
-
-			if (device_extensions.is_supported(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME))
-			{
-				driver_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES_KHR;
-				driver_properties.pNext = features2.pNext;
-				features2.pNext         = &driver_properties;
 			}
 
 			if (device_extensions.is_supported(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME))
@@ -131,6 +120,8 @@ namespace vk
 		}
 
 		supported_extensions instance_extensions(supported_extensions::instance);
+		supported_extensions device_extensions(supported_extensions::device, nullptr, dev);
+
 		if (!instance_extensions.is_supported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME))
 		{
 			vkGetPhysicalDeviceProperties(dev, &props);
@@ -150,38 +141,18 @@ namespace vk
 				properties2.pNext = &descriptor_indexing_props;
 			}
 
+			if (device_extensions.is_supported(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME))
+			{
+				driver_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES_KHR;
+				driver_properties.pNext = properties2.pNext;
+				properties2.pNext = &driver_properties;
+			}
+
 			auto _vkGetPhysicalDeviceProperties2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2KHR>(vkGetInstanceProcAddr(parent, "vkGetPhysicalDeviceProperties2KHR"));
 			ensure(_vkGetPhysicalDeviceProperties2KHR);
 
 			_vkGetPhysicalDeviceProperties2KHR(dev, &properties2);
 			props = properties2.properties;
-
-#ifdef __APPLE__
-		if (instance_extensions.is_supported(VK_MVK_MOLTENVK_EXTENSION_NAME))
-		{
-			MVKConfiguration mvk_config = {};
-			size_t mvk_config_size = sizeof(MVKConfiguration);
-
-			PFN_vkGetMoltenVKConfigurationMVK _vkGetMoltenVKConfigurationMVK = nullptr;
-			_vkGetMoltenVKConfigurationMVK = reinterpret_cast<PFN_vkGetMoltenVKConfigurationMVK>(vkGetInstanceProcAddr(parent, "vkGetMoltenVKConfigurationMVK"));
-			ensure(_vkGetMoltenVKConfigurationMVK);
-
-			PFN_vkSetMoltenVKConfigurationMVK _vkSetMoltenVKConfigurationMVK = nullptr;
-			_vkSetMoltenVKConfigurationMVK = reinterpret_cast<PFN_vkSetMoltenVKConfigurationMVK>(vkGetInstanceProcAddr(parent, "vkSetMoltenVKConfigurationMVK"));
-			ensure(_vkSetMoltenVKConfigurationMVK);
-
-			CHECK_RESULT_EX(_vkGetMoltenVKConfigurationMVK(VK_NULL_HANDLE, &mvk_config, &mvk_config_size), std::string("Could not get MoltenVK configuration."));
-
-			mvk_config.resumeLostDevice = true;
-			mvk_config.fastMathEnabled = g_cfg.video.disable_msl_fast_math.get() ? MVK_CONFIG_FAST_MATH_NEVER : MVK_CONFIG_FAST_MATH_ON_DEMAND;
-
-			CHECK_RESULT_EX(_vkSetMoltenVKConfigurationMVK(VK_NULL_HANDLE, &mvk_config, &mvk_config_size), std::string("Could not set MoltenVK configuration."));
-		}
-		else
-		{
-			rsx_log.error("Cannot set the MoltenVK configuration because VK_MVK_moltenvk is not supported.\nIf you're using MoltenVK through libvulkan, please manually set the appropriate environment variables instead.");
-		}
-#endif
 
 			if (descriptor_indexing_support)
 			{
@@ -255,6 +226,11 @@ namespace vk
 		{
 			const auto gpu_name = get_name();
 
+			if (gpu_name.find("Microsoft Direct3D12") != umax)
+			{
+				return driver_vendor::DOZEN;
+			}
+
 			if (gpu_name.find("RADV") != umax)
 			{
 				return driver_vendor::RADV;
@@ -267,6 +243,11 @@ namespace vk
 
 			if (gpu_name.find("NVIDIA") != umax || gpu_name.find("GeForce") != umax || gpu_name.find("Quadro") != umax)
 			{
+				if (gpu_name.find("NVK") != umax)
+				{
+					return driver_vendor::NVK;
+				}
+
 				return driver_vendor::NVIDIA;
 			}
 
@@ -277,6 +258,11 @@ namespace vk
 #else
 				return driver_vendor::ANV;
 #endif
+			}
+
+			if (gpu_name.find("llvmpipe") != umax)
+			{
+				return driver_vendor::LAVAPIPE;
 			}
 
 			return driver_vendor::unknown;
@@ -296,6 +282,12 @@ namespace vk
 				return driver_vendor::INTEL;
 			case VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA_KHR:
 				return driver_vendor::ANV;
+			case VK_DRIVER_ID_MESA_DOZEN:
+				return driver_vendor::DOZEN;
+			case VK_DRIVER_ID_MESA_LLVMPIPE:
+				return driver_vendor::LAVAPIPE;
+			case VK_DRIVER_ID_MESA_NVK:
+				return driver_vendor::NVK;
 			default:
 				// Mobile?
 				return driver_vendor::unknown;
@@ -380,7 +372,6 @@ namespace vk
 	// Render Device - The actual usable device
 	void render_device::create(vk::physical_device& pdev, u32 graphics_queue_idx, u32 present_queue_idx, u32 transfer_queue_idx)
 	{
-		std::string message_on_error;
 		float queue_priorities[1] = { 0.f };
 		pgpu = &pdev;
 
@@ -526,6 +517,13 @@ namespace vk
 		enabled_features.shaderStorageBufferArrayDynamicIndexing = VK_TRUE;
 
 		// Optionally disable unsupported stuff
+		if (!pgpu->features.fullDrawIndexUint32)
+		{
+			// There's really nothing we can do about PS3 draw indices, just pray your GPU doesn't crash.
+			rsx_log.error("Your GPU driver does not fully support 32-bit vertex indices. This may result in graphical corruption or crashes in some cases.");
+			enabled_features.fullDrawIndexUint32 = VK_FALSE;
+		}
+
 		if (!pgpu->features.shaderStorageImageMultisample || !pgpu->features.shaderStorageImageWriteWithoutFormat)
 		{
 			// Disable MSAA if any of these two features are unsupported
@@ -571,6 +569,12 @@ namespace vk
 			enabled_features.depthBounds = VK_FALSE;
 		}
 
+		if (!pgpu->features.largePoints)
+		{
+			rsx_log.error("Your GPU does not support large points. Graphics may not render correctly.");
+			enabled_features.largePoints = VK_FALSE;
+		}
+
 		if (!pgpu->features.wideLines)
 		{
 			rsx_log.error("Your GPU does not support wide lines. Graphics may not render correctly.");
@@ -596,13 +600,11 @@ namespace vk
 			enabled_features.occlusionQueryPrecise = VK_FALSE;
 		}
 
-#ifdef __APPLE__
 		if (!pgpu->features.logicOp)
 		{
 			rsx_log.error("Your GPU does not support framebuffer logical operations. Graphics may not render correctly.");
 			enabled_features.logicOp = VK_FALSE;
 		}
-#endif
 
 		VkDeviceCreateInfo device = {};
 		device.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -677,7 +679,11 @@ namespace vk
 			device.pNext = &synchronization2_info;
 		}
 
-		CHECK_RESULT_EX(vkCreateDevice(*pgpu, &device, nullptr, &dev), message_on_error);
+		if (auto error = vkCreateDevice(*pgpu, &device, nullptr, &dev))
+		{
+			dump_debug_info(requested_extensions, enabled_features);
+			vk::die_with_error(error);
+		}
 
 		// Dump some diagnostics to the log
 		rsx_log.notice("%u extensions loaded:", ::size32(requested_extensions));
@@ -803,6 +809,87 @@ namespace vk
 	{
 		// Rebalance device local memory types
 		memory_map.device_local.rebalance();
+	}
+
+	void render_device::dump_debug_info(
+		const std::vector<const char*>& requested_extensions,
+		const VkPhysicalDeviceFeatures& requested_features) const
+	{
+		rsx_log.notice("Dumping requested extensions...");
+		auto device_extensions = vk::supported_extensions(vk::supported_extensions::enumeration_class::device, nullptr, *pgpu);
+		for (const auto& ext : requested_extensions)
+		{
+			rsx_log.notice("[%s] %s", device_extensions.is_supported(ext) ? "Supported" : "Not supported", ext);
+		}
+
+		rsx_log.notice("Dumping requested features...");
+		const auto& supported_features = pgpu->features;
+
+#define TEST_VK_FEATURE(name) \
+		if (requested_features.name) {\
+			if (supported_features.name) \
+				rsx_log.notice("[Supported] "#name); \
+			else \
+				rsx_log.error("[Not supported] "#name); \
+		}
+
+		TEST_VK_FEATURE(robustBufferAccess);
+		TEST_VK_FEATURE(fullDrawIndexUint32);
+		TEST_VK_FEATURE(imageCubeArray);
+		TEST_VK_FEATURE(independentBlend);
+		TEST_VK_FEATURE(geometryShader);
+		TEST_VK_FEATURE(tessellationShader);
+		TEST_VK_FEATURE(sampleRateShading);
+		TEST_VK_FEATURE(dualSrcBlend);
+		TEST_VK_FEATURE(logicOp);
+		TEST_VK_FEATURE(multiDrawIndirect);
+		TEST_VK_FEATURE(drawIndirectFirstInstance);
+		TEST_VK_FEATURE(depthClamp);
+		TEST_VK_FEATURE(depthBiasClamp);
+		TEST_VK_FEATURE(fillModeNonSolid);
+		TEST_VK_FEATURE(depthBounds);
+		TEST_VK_FEATURE(wideLines);
+		TEST_VK_FEATURE(largePoints);
+		TEST_VK_FEATURE(alphaToOne);
+		TEST_VK_FEATURE(multiViewport);
+		TEST_VK_FEATURE(samplerAnisotropy);
+		TEST_VK_FEATURE(textureCompressionETC2);
+		TEST_VK_FEATURE(textureCompressionASTC_LDR);
+		TEST_VK_FEATURE(textureCompressionBC);
+		TEST_VK_FEATURE(occlusionQueryPrecise);
+		TEST_VK_FEATURE(pipelineStatisticsQuery);
+		TEST_VK_FEATURE(vertexPipelineStoresAndAtomics);
+		TEST_VK_FEATURE(fragmentStoresAndAtomics);
+		TEST_VK_FEATURE(shaderTessellationAndGeometryPointSize);
+		TEST_VK_FEATURE(shaderImageGatherExtended);
+		TEST_VK_FEATURE(shaderStorageImageExtendedFormats);
+		TEST_VK_FEATURE(shaderStorageImageMultisample);
+		TEST_VK_FEATURE(shaderStorageImageReadWithoutFormat);
+		TEST_VK_FEATURE(shaderStorageImageWriteWithoutFormat);
+		TEST_VK_FEATURE(shaderUniformBufferArrayDynamicIndexing);
+		TEST_VK_FEATURE(shaderSampledImageArrayDynamicIndexing);
+		TEST_VK_FEATURE(shaderStorageBufferArrayDynamicIndexing);
+		TEST_VK_FEATURE(shaderStorageImageArrayDynamicIndexing);
+		TEST_VK_FEATURE(shaderClipDistance);
+		TEST_VK_FEATURE(shaderCullDistance);
+		TEST_VK_FEATURE(shaderFloat64);
+		TEST_VK_FEATURE(shaderInt64);
+		TEST_VK_FEATURE(shaderInt16);
+		TEST_VK_FEATURE(shaderResourceResidency);
+		TEST_VK_FEATURE(shaderResourceMinLod);
+		TEST_VK_FEATURE(sparseBinding);
+		TEST_VK_FEATURE(sparseResidencyBuffer);
+		TEST_VK_FEATURE(sparseResidencyImage2D);
+		TEST_VK_FEATURE(sparseResidencyImage3D);
+		TEST_VK_FEATURE(sparseResidency2Samples);
+		TEST_VK_FEATURE(sparseResidency4Samples);
+		TEST_VK_FEATURE(sparseResidency8Samples);
+		TEST_VK_FEATURE(sparseResidency16Samples);
+		TEST_VK_FEATURE(sparseResidencyAliased);
+		TEST_VK_FEATURE(variableMultisampleRate);
+		TEST_VK_FEATURE(inheritedQueries);
+
+#undef TEST_VK_FEATURE
 	}
 
 	// Shared Util

@@ -458,7 +458,12 @@ public:
 
 	void update_emu_cfg();
 
+	u32 get_sample_rate() const;
+	u8 get_channel_count() const;
+
 	static constexpr auto thread_name = "RsxAudio Backend Thread"sv;
+
+	SAVESTATE_INIT_POS(8.91); // Depends on audio_out_configuration
 
 private:
 
@@ -472,6 +477,7 @@ private:
 		bool enable_time_stretching = false;
 		bool dump_to_file = false;
 		AudioChannelCnt channels = AudioChannelCnt::STEREO;
+		audio_channel_layout channel_layout = audio_channel_layout::automatic;
 		audio_renderer renderer = audio_renderer::null;
 		audio_provider provider = audio_provider::none;
 		RsxaudioAvportIdx avport = RsxaudioAvportIdx::HDMI_0;
@@ -498,8 +504,8 @@ private:
 		RsxaudioAvportIdx avport_idx = RsxaudioAvportIdx::HDMI_0;
 		u8 mute_state : SYS_RSXAUDIO_AVPORT_CNT = 0b11111;
 
-		u8 input_ch_cnt : 4      = 2;
-		u8 output_ch_cnt : 4     = 2;
+		u8 input_ch_cnt          : 4 = 2;
+		u8 output_channel_layout : 4 = static_cast<u8>(audio_channel_layout::stereo);
 
 		bool ready : 1           = false;
 		bool convert_to_s16 : 1  = false;
@@ -525,7 +531,7 @@ private:
 	u64 start_time = get_system_time();
 	u64 time_period_idx = 1;
 
-	emu_audio_cfg new_emu_cfg{get_emu_cfg()};
+	emu_audio_cfg new_emu_cfg{};
 	bool emu_cfg_changed = true;
 
 	rsxaudio_state new_ra_state{};

@@ -323,7 +323,7 @@ namespace vk
 			{
 				// This format is completely worthless to CPU processing algorithms where cache lines on die are linear.
 				// If this is happening, usually it means it was not a planned readback (e.g shared pages situation)
-				rsx_log.warning("[Performance warning] CPU readback of swizzled data");
+				rsx_log.trace("[Performance warning] CPU readback of swizzled data");
 
 				// Read-modify-write to avoid corrupting already resident memory outside texture region
 				void* data = get_ptr(range.start);
@@ -482,7 +482,8 @@ namespace vk
 		cached_texture_section* create_new_texture(vk::command_buffer& cmd, const utils::address_range& rsx_range, u16 width, u16 height, u16 depth, u16 mipmaps, u32 pitch,
 			u32 gcm_format, rsx::texture_upload_context context, rsx::texture_dimension_extended type, bool swizzled, rsx::component_order swizzle_flags, rsx::flags32_t flags) override;
 
-		cached_texture_section* create_nul_section(vk::command_buffer& cmd, const utils::address_range& rsx_range, bool memory_load) override;
+		cached_texture_section* create_nul_section(vk::command_buffer& cmd, const utils::address_range& rsx_range, const rsx::image_section_attributes_t& attrs,
+			const rsx::GCM_tile_reference& tile, bool memory_load) override;
 
 		cached_texture_section* upload_image_from_cpu(vk::command_buffer& cmd, const utils::address_range& rsx_range, u16 width, u16 height, u16 depth, u16 mipmaps, u32 pitch, u32 gcm_format,
 			rsx::texture_upload_context context, const std::vector<rsx::subresource_layout>& subresource_layout, rsx::texture_dimension_extended type, bool swizzled) override;
@@ -504,13 +505,20 @@ namespace vk
 
 		void destroy() override;
 
+		std::unique_ptr<vk::viewable_image> create_temporary_subresource_storage(
+			rsx::format_class format_class, VkFormat format,
+			u16 width, u16 height, u16 depth, u16 layers, u8 mips,
+			VkImageType image_type, VkFlags image_flags, VkFlags usage_flags);
+
+		void dispose_reusable_image(std::unique_ptr<vk::viewable_image>& tex);
+
 		bool is_depth_texture(u32 rsx_address, u32 rsx_size) override;
 
 		void on_frame_end() override;
 
 		vk::viewable_image* upload_image_simple(vk::command_buffer& cmd, VkFormat format, u32 address, u32 width, u32 height, u32 pitch);
 
-		bool blit(rsx::blit_src_info& src, rsx::blit_dst_info& dst, bool interpolate, vk::surface_cache& m_rtts, vk::command_buffer& cmd);
+		bool blit(const rsx::blit_src_info& src, const rsx::blit_dst_info& dst, bool interpolate, vk::surface_cache& m_rtts, vk::command_buffer& cmd);
 
 		u32 get_unreleased_textures_count() const override;
 

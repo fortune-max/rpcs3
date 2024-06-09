@@ -5,7 +5,6 @@
 #include "GLTextureCache.h"
 #include "GLRenderTargets.h"
 #include "GLProgramBuffer.h"
-#include "GLTextOut.h"
 #include "GLOverlays.h"
 #include "GLShaderInterpreter.h"
 
@@ -13,10 +12,13 @@
 #include <unordered_map>
 
 #include "glutils/ring_buffer.h"
+#include "upscalers/upscaling.h"
 
 #ifdef _MSC_VER
 #pragma comment(lib, "opengl32.lib")
 #endif
+
+using namespace gl::upscaling_flags_;
 
 namespace gl
 {
@@ -65,6 +67,7 @@ namespace gl
 		u32 width;
 		u32 height;
 		u32 pitch;
+		u8  eye;
 	};
 }
 
@@ -105,6 +108,9 @@ class GLGSRender : public GSRender, public ::rsx::reports::ZCULL_control
 	// Identity buffer used to fix broken gl_VertexID on ATI stack
 	std::unique_ptr<gl::buffer> m_identity_index_buffer;
 
+	// Used for hot-patching
+	std::unique_ptr<gl::ring_buffer> m_scratch_ring_buffer;
+
 	std::unique_ptr<gl::vertex_cache> m_vertex_cache;
 	std::unique_ptr<gl::shader_cache> m_shaders_cache;
 
@@ -114,7 +120,6 @@ class GLGSRender : public GSRender, public ::rsx::reports::ZCULL_control
 
 	bool manually_flush_ring_buffers = false;
 
-	gl::text_writer m_text_printer;
 	gl::ui_overlay_renderer m_ui_renderer;
 	gl::video_out_calibration_pass m_video_output_pass;
 
@@ -126,8 +131,11 @@ class GLGSRender : public GSRender, public ::rsx::reports::ZCULL_control
 	//buffer
 	gl::fbo* m_draw_fbo = nullptr;
 	std::list<gl::framebuffer_holder> m_framebuffer_cache;
-	gl::fbo m_flip_fbo;
-	std::unique_ptr<gl::texture> m_flip_tex_color;
+	std::unique_ptr<gl::texture> m_flip_tex_color[2];
+
+	// Present
+	std::unique_ptr<gl::upscaler> m_upscaler;
+	output_scaling_mode m_output_scaling = output_scaling_mode::bilinear;
 
 	//vaos are mandatory for core profile
 	gl::vao m_vao;
@@ -137,7 +145,7 @@ class GLGSRender : public GSRender, public ::rsx::reports::ZCULL_control
 	std::array<std::unique_ptr<rsx::sampled_image_descriptor_base>, rsx::limits::fragment_textures_count> fs_sampler_state = {};
 	std::array<std::unique_ptr<rsx::sampled_image_descriptor_base>, rsx::limits::vertex_textures_count> vs_sampler_state = {};
 	std::unordered_map<GLenum, std::unique_ptr<gl::texture>> m_null_textures;
-	std::vector<u8> m_scratch_buffer;
+	rsx::simple_array<u8> m_scratch_buffer;
 
 	// Occlusion query type, can be SAMPLES_PASSED or ANY_SAMPLES_PASSED
 	GLenum m_occlusion_type = GL_ANY_SAMPLES_PASSED;
@@ -161,6 +169,7 @@ private:
 	bool load_program();
 	void load_program_env();
 	void update_vertex_env(const gl::vertex_upload_info& upload_info);
+	void upload_transform_constants(const rsx::io_buffer& buffer);
 
 	void update_draw_state();
 
@@ -175,13 +184,17 @@ public:
 
 	gl::work_item& post_flush_request(u32 address, gl::texture_cache::thrashed_set& flush_data);
 
-	bool scaled_image_from_memory(rsx::blit_src_info& src_info, rsx::blit_dst_info& dst_info, bool interpolate) override;
+	bool scaled_image_from_memory(const rsx::blit_src_info& src_info, const rsx::blit_dst_info& dst_info, bool interpolate) override;
 
+	// ZCULL
 	void begin_occlusion_query(rsx::reports::occlusion_query_info* query) override;
 	void end_occlusion_query(rsx::reports::occlusion_query_info* query) override;
 	bool check_occlusion_query_status(rsx::reports::occlusion_query_info* query) override;
 	void get_occlusion_query_result(rsx::reports::occlusion_query_info* query) override;
 	void discard_occlusion_query(rsx::reports::occlusion_query_info* query) override;
+
+	// GRAPH backend
+	void patch_transform_constants(rsx::context* ctx, u32 index, u32 count) override;
 
 protected:
 	void clear_surface(u32 arg) override;

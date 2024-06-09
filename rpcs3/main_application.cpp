@@ -19,6 +19,7 @@
 #include "Emu/Io/MouseHandler.h"
 #include "Input/basic_keyboard_handler.h"
 #include "Input/basic_mouse_handler.h"
+#include "Input/raw_mouse_handler.h"
 
 #include "Emu/Audio/AudioBackend.h"
 #include "Emu/Audio/Null/NullAudioBackend.h"
@@ -50,6 +51,7 @@ namespace audio
 namespace rsx::overlays
 {
 	extern void reset_performance_overlay();
+	extern void reset_debug_overlay();
 }
 
 /** Emu.Init() wrapper for user management */
@@ -91,6 +93,7 @@ void main_application::OnEmuSettingsChange()
 	audio::configure_audio();
 	audio::configure_rsxaudio();
 	rsx::overlays::reset_performance_overlay();
+	rsx::overlays::reset_debug_overlay();
 }
 
 /** RPCS3 emulator has functions it desires to call from the GUI at times. Initialize them in here. */
@@ -139,15 +142,25 @@ EmuCallbacks main_application::CreateCallbacks()
 		{
 		case mouse_handler::null:
 		{
-			if (g_cfg.io.move == move_handler::mouse)
+			switch (g_cfg.io.move)
+			{
+			case move_handler::mouse:
 			{
 				basic_mouse_handler* ret = g_fxo->init<MouseHandlerBase, basic_mouse_handler>(Emu.DeserialManager());
 				ret->moveToThread(get_thread());
 				ret->SetTargetWindow(m_game_window);
+				break;
 			}
-			else
+			case move_handler::raw_mouse:
+			{
+				g_fxo->init<MouseHandlerBase, raw_mouse_handler>(Emu.DeserialManager());
+				break;
+			}
+			default:
 			{
 				g_fxo->init<MouseHandlerBase, NullMouseHandler>(Emu.DeserialManager());
+				break;
+			}
 			}
 
 			break;
@@ -157,6 +170,11 @@ EmuCallbacks main_application::CreateCallbacks()
 			basic_mouse_handler* ret = g_fxo->init<MouseHandlerBase, basic_mouse_handler>(Emu.DeserialManager());
 			ret->moveToThread(get_thread());
 			ret->SetTargetWindow(m_game_window);
+			break;
+		}
+		case mouse_handler::raw:
+		{
+			g_fxo->init<MouseHandlerBase, raw_mouse_handler>(Emu.DeserialManager());
 			break;
 		}
 		}

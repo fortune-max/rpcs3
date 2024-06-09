@@ -5,6 +5,7 @@
 #include "util/shared_ptr.hpp"
 
 #include <string>
+#include <concepts>
 
 #include "mutex.h"
 #include "lockless.h"
@@ -20,10 +21,10 @@ enum class native_core_arrangement : u32
 
 enum class thread_class : u32
 {
-	general,
-	rsx,
-	spu,
-	ppu
+	general = 0,
+	ppu = 1,
+	spu = 2,
+	rsx = 0x55,
 };
 
 enum class thread_state : u32
@@ -83,9 +84,9 @@ struct result_storage<Ctx, Args...>
 };
 
 template <typename T>
-concept NamedThreadName = requires (const T& t)
+concept NamedThreadName = requires (const T&)
 {
-	std::string(t.thread_name);
+	std::string(T::thread_name);
 };
 
 // Base class for task queue (linked list)
@@ -129,6 +130,9 @@ public:
 
 	const native_entry entry_point;
 
+	// Set name for debugger
+	static void set_name(std::string);
+
 private:
 	// Thread handle (platform-specific)
 	atomic_t<u64> m_thread{0};
@@ -158,9 +162,6 @@ private:
 
 	// Cleanup after possibly deleting the thread instance
 	static native_entry finalize(u64 _self) noexcept;
-
-	// Set name for debugger
-	static void set_name(std::string);
 
 	// Make entry point
 	static native_entry make_trampoline(u64(*entry)(thread_base* _base));
@@ -217,6 +218,11 @@ public:
 	// Get current thread name
 	static std::string get_name()
 	{
+		if (!g_tls_this_thread)
+		{
+			return "not named_thread";
+		}
+
 		return *g_tls_this_thread->m_tname.load();
 	}
 
@@ -446,6 +452,11 @@ public:
 	}
 };
 
+namespace stx
+{
+	struct launch_retainer;
+}
+
 // Derived from the callable object Context, possibly a lambda
 template <class Context>
 class named_thread final : public Context, result_storage<Context>, thread_base
@@ -512,17 +523,27 @@ class named_thread final : public Context, result_storage<Context>, thread_base
 
 public:
 	// Forwarding constructor with default name (also potentially the default constructor)
-	template <typename... Args> requires (std::is_constructible_v<Context, Args&&...>) && (NamedThreadName<Context>)
-	named_thread(Args&&... args)
+	template <typename... Args> requires (std::is_constructible_v<Context, Args&&...>) && (!(std::is_same_v<std::remove_cvref_t<Args>, stx::launch_retainer> || ...)) && (NamedThreadName<Context>)
+	named_thread(Args&&... args) noexcept
 		: Context(std::forward<Args>(args)...)
 		, thread(trampoline, std::string(Context::thread_name))
 	{
 		thread::start();
 	}
 
+	// Forwarding constructor with default name, does not automatically run the thread
+	template <typename... Args> requires (std::is_constructible_v<Context, Args&&...>) && (NamedThreadName<Context>)
+	named_thread(const stx::launch_retainer&, Args&&... args) noexcept
+		: Context(std::forward<Args>(args)...)
+		, thread(trampoline, std::string(Context::thread_name))
+	{
+		// Create a stand-by thread context
+		m_sync |= static_cast<u32>(thread_state::finished);
+	}
+
 	// Normal forwarding constructor
-	template <typename... Args> requires (std::is_constructible_v<Context, Args&&...>)
-	named_thread(std::string name, Args&&... args)
+	template <typename... Args> requires (std::is_constructible_v<Context, Args&&...>) && (!NamedThreadName<Context>)
+	named_thread(std::string name, Args&&... args) noexcept
 		: Context(std::forward<Args>(args)...)
 		, thread(trampoline, std::move(name))
 	{
@@ -530,7 +551,7 @@ public:
 	}
 
 	// Lambda constructor, also the implicit deduction guide candidate
-	named_thread(std::string_view name, Context&& f)
+	named_thread(std::string_view name, Context&& f) noexcept requires (!NamedThreadName<Context>)
 		: Context(std::forward<Context>(f))
 		, thread(trampoline, std::string(name))
 	{
@@ -644,12 +665,20 @@ public:
 		return static_cast<thread_state>(thread::m_sync.load() & 3);
 	}
 
-	// Try to abort by assigning thread_state::aborting/finished
-	// Join thread by thread_state::finished
 	named_thread& operator=(thread_state s)
 	{
+		if (s == thread_state::created)
+		{
+			// Run thread
+			ensure(operator thread_state() == thread_state::finished);
+			thread::start();
+			return *this;
+		}
+
 		bool notify_sync = false;
 
+		// Try to abort by assigning thread_state::aborting/finished
+		// Join thread by thread_state::finished
 		if (s >= thread_state::aborting && thread::m_sync.fetch_op([](u32& v) { return !(v & 3) && (v |= 1); }).second)
 		{
 			notify_sync = true;
@@ -839,10 +868,10 @@ public:
 
 	~named_thread_group() noexcept
 	{
-		// Destroy all threads (it should join them)
-		for (u32 i = m_count - 1; i < m_count; i--)
+		// Destroy all threads in reverse order (it should join them)
+		for (u32 i = 0; i < m_count; i++)
 		{
-			std::launder(m_threads + i)->~Thread();
+			std::launder(m_threads + (m_count - i - 1))->~Thread();
 		}
 
 		::operator delete(static_cast<void*>(m_threads), std::align_val_t{alignof(Thread)});

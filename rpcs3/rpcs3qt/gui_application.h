@@ -4,6 +4,7 @@
 #include "util/atomic.hpp"
 
 #include <QApplication>
+#include <QAbstractNativeEventFilter>
 #include <QElapsedTimer>
 #include <QTimer>
 #include <QTranslator>
@@ -12,15 +13,19 @@
 #include "main_application.h"
 
 #include "Emu/System.h"
+#include "Input/raw_mouse_handler.h"
 
 #include <memory>
 #include <functional>
+#include <deque>
 
 class gs_frame;
 class main_window;
 class gui_settings;
 class emu_settings;
 class persistent_settings;
+
+extern std::unique_ptr<raw_mouse_handler> g_raw_mouse_handler; // Only used for GUI
 
 /** RPCS3 GUI Application Class
  * The main point of this class is to do application initialization, to hold the main and game windows and to initialize callbacks.
@@ -81,6 +86,13 @@ private:
 	void UpdatePlaytime();
 	void StopPlaytime();
 
+	class native_event_filter : public QAbstractNativeEventFilter
+	{
+	public:
+		bool nativeEventFilter(const QByteArray& eventType, void* message, qintptr* result) override;
+
+	} m_native_event_filter;
+
 	QTranslator m_translator;
 	QTranslator m_translator_qt;
 	QString m_language_code;
@@ -88,11 +100,13 @@ private:
 	QTimer m_timer;
 	QElapsedTimer m_timer_playtime;
 
-	QSoundEffect m_sound_effect{};
+	std::deque<std::unique_ptr<QSoundEffect>> m_sound_effects{};
 
 	std::shared_ptr<emu_settings> m_emu_settings;
 	std::shared_ptr<gui_settings> m_gui_settings;
 	std::shared_ptr<persistent_settings> m_persistent_settings;
+
+	QString m_default_style;
 
 	bool m_show_gui = true;
 	bool m_use_cli_style = false;

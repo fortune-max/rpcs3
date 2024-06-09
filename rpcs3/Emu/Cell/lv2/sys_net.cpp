@@ -329,9 +329,14 @@ void lv2_socket::save(utils::serial& ar, bool save_only_this_class)
 	}
 }
 
-void sys_net_dump_data(std::string_view desc, const u8* data, s32 len)
+void sys_net_dump_data(std::string_view desc, const u8* data, s32 len, const void* addr)
 {
-	sys_net_dump.trace("%s:%s", desc, fmt::buf_to_hexstring(data, len));
+	const sys_net_sockaddr_in_p2p* p2p_addr = reinterpret_cast<const sys_net_sockaddr_in_p2p*>(addr);
+
+	if (p2p_addr)
+		sys_net_dump.trace("%s(%s:%d:%d): %s", desc, np::ip_to_string(std::bit_cast<u32>(p2p_addr->sin_addr)), p2p_addr->sin_port, p2p_addr->sin_vport, fmt::buf_to_hexstring(data, len));
+	else
+		sys_net_dump.trace("%s: %s", desc, fmt::buf_to_hexstring(data, len));
 }
 
 error_code sys_net_bnet_accept(ppu_thread& ppu, s32 s, vm::ptr<sys_net_sockaddr> addr, vm::ptr<u32> paddrlen)
@@ -770,7 +775,7 @@ error_code sys_net_bnet_recvfrom(ppu_thread& ppu, s32 s, vm::ptr<void> buf, u32 
 {
 	ppu.state += cpu_flag::wait;
 
-	sys_net.warning("sys_net_bnet_recvfrom(s=%d, buf=*0x%x, len=%u, flags=0x%x, addr=*0x%x, paddrlen=*0x%x)", s, buf, len, flags, addr, paddrlen);
+	sys_net.trace("sys_net_bnet_recvfrom(s=%d, buf=*0x%x, len=%u, flags=0x%x, addr=*0x%x, paddrlen=*0x%x)", s, buf, len, flags, addr, paddrlen);
 
 	// If addr is null, paddrlen must be null as well
 	if (!buf || !len || addr.operator bool() != paddrlen.operator bool())
@@ -797,7 +802,7 @@ error_code sys_net_bnet_recvfrom(ppu_thread& ppu, s32 s, vm::ptr<void> buf, u32 
 				{
 					sn_addr = res_addr;
 					std::memcpy(buf.get_ptr(), vec.data(), res);
-					sys_net_dump_data("recvfrom", vec.data(), res);
+					sys_net_dump_data("recvfrom", vec.data(), res, &res_addr);
 				}
 
 				result = res;
@@ -819,7 +824,7 @@ error_code sys_net_bnet_recvfrom(ppu_thread& ppu, s32 s, vm::ptr<void> buf, u32 
 							{
 								sn_addr = res_addr;
 								std::memcpy(buf.get_ptr(), vec.data(), res);
-								sys_net_dump_data("recvfrom", vec.data(), res);
+								sys_net_dump_data("recvfrom", vec.data(), res, &res_addr);
 							}
 							result = res;
 							lv2_obj::awake(&ppu);
@@ -984,7 +989,7 @@ error_code sys_net_bnet_sendto(ppu_thread& ppu, s32 s, vm::cptr<void> buf, u32 l
 {
 	ppu.state += cpu_flag::wait;
 
-	sys_net.warning("sys_net_bnet_sendto(s=%d, buf=*0x%x, len=%u, flags=0x%x, addr=*0x%x, addrlen=%u)", s, buf, len, flags, addr, addrlen);
+	sys_net.trace("sys_net_bnet_sendto(s=%d, buf=*0x%x, len=%u, flags=0x%x, addr=*0x%x, addrlen=%u)", s, buf, len, flags, addr, addrlen);
 
 	if (flags & ~(SYS_NET_MSG_DONTWAIT | SYS_NET_MSG_WAITALL | SYS_NET_MSG_USECRYPTO | SYS_NET_MSG_USESIGNATURE))
 	{
@@ -1003,7 +1008,7 @@ error_code sys_net_bnet_sendto(ppu_thread& ppu, s32 s, vm::cptr<void> buf, u32 l
 		return -SYS_NET_EAFNOSUPPORT;
 	}
 
-	sys_net_dump_data("sendto", static_cast<const u8 *>(buf.get_ptr()), len);
+	sys_net_dump_data("sendto", static_cast<const u8*>(buf.get_ptr()), len, addr ? addr.get_ptr() : nullptr);
 
 	const std::optional<sys_net_sockaddr> sn_addr = addr ? std::optional<sys_net_sockaddr>(*addr) : std::nullopt;
 	const std::vector<u8> buf_copy(vm::_ptr<const char>(buf.addr()), vm::_ptr<const char>(buf.addr()) + len);
@@ -1245,7 +1250,7 @@ error_code sys_net_bnet_close(ppu_thread& ppu, s32 s)
 
 	{
 		// Ensures the socket has no lingering copy from the network thread
-		std::lock_guard nw_lock(g_fxo->get<network_context>().s_nw_mutex);
+		std::lock_guard nw_lock(g_fxo->get<network_context>().mutex_thread_loop);
 		sock.reset();
 	}
 
@@ -1256,7 +1261,7 @@ error_code sys_net_bnet_poll(ppu_thread& ppu, vm::ptr<sys_net_pollfd> fds, s32 n
 {
 	ppu.state += cpu_flag::wait;
 
-	sys_net.warning("sys_net_bnet_poll(fds=*0x%x, nfds=%d, ms=%d)", fds, nfds, ms);
+	sys_net.trace("sys_net_bnet_poll(fds=*0x%x, nfds=%d, ms=%d)", fds, nfds, ms);
 
 	if (nfds <= 0)
 	{
@@ -1274,7 +1279,7 @@ error_code sys_net_bnet_poll(ppu_thread& ppu, vm::ptr<sys_net_pollfd> fds, s32 n
 
 		lv2_obj::prepare_for_sleep(ppu);
 
-		std::unique_lock nw_lock(g_fxo->get<network_context>().s_nw_mutex);
+		std::unique_lock nw_lock(g_fxo->get<network_context>().mutex_thread_loop);
 		std::shared_lock lock(id_manager::g_mutex);
 
 		std::vector<::pollfd> _fds(nfds);
@@ -1370,7 +1375,7 @@ error_code sys_net_bnet_poll(ppu_thread& ppu, vm::ptr<sys_net_pollfd> fds, s32 n
 								fds_buf[i].revents |= SYS_NET_POLLERR;
 
 							signaled++;
-							g_fxo->get<network_context>().s_to_awake.emplace_back(&ppu);
+							sock->queue_wake(&ppu);
 							return true;
 						}
 
@@ -1407,7 +1412,7 @@ error_code sys_net_bnet_poll(ppu_thread& ppu, vm::ptr<sys_net_pollfd> fds, s32 n
 					return {};
 				}
 
-				std::lock_guard nw_lock(g_fxo->get<network_context>().s_nw_mutex);
+				std::lock_guard nw_lock(g_fxo->get<network_context>().mutex_thread_loop);
 
 				if (signaled)
 				{
@@ -1424,12 +1429,12 @@ error_code sys_net_bnet_poll(ppu_thread& ppu, vm::ptr<sys_net_pollfd> fds, s32 n
 		}
 	}
 
-	std::memcpy(fds.get_ptr(), fds_buf.data(), nfds * sizeof(fds[0]));
-
 	if (!has_timedout && !signaled)
 	{
 		return -SYS_NET_EINTR;
 	}
+
+	std::memcpy(fds.get_ptr(), fds_buf.data(), nfds * sizeof(fds[0]));
 
 	return not_an_error(signaled);
 }
@@ -1438,7 +1443,7 @@ error_code sys_net_bnet_select(ppu_thread& ppu, s32 nfds, vm::ptr<sys_net_fd_set
 {
 	ppu.state += cpu_flag::wait;
 
-	sys_net.warning("sys_net_bnet_select(nfds=%d, readfds=*0x%x, writefds=*0x%x, exceptfds=*0x%x, timeout=*0x%x)", nfds, readfds, writefds, exceptfds, _timeout);
+	sys_net.trace("sys_net_bnet_select(nfds=%d, readfds=*0x%x, writefds=*0x%x, exceptfds=*0x%x, timeout=*0x%x(%d:%d))", nfds, readfds, writefds, exceptfds, _timeout, _timeout ? _timeout->tv_sec.value() : 0, _timeout ? _timeout->tv_usec.value() : 0);
 
 	atomic_t<s32> signaled{0};
 
@@ -1469,8 +1474,7 @@ error_code sys_net_bnet_select(ppu_thread& ppu, s32 nfds, vm::ptr<sys_net_fd_set
 		if (exceptfds)
 			_exceptfds = *exceptfds;
 
-		std::lock_guard nw_lock(g_fxo->get<network_context>().s_nw_mutex);
-
+		std::lock_guard nw_lock(g_fxo->get<network_context>().mutex_thread_loop);
 		reader_lock lock(id_manager::g_mutex);
 
 		std::vector<::pollfd> _fds(nfds);
@@ -1602,7 +1606,7 @@ error_code sys_net_bnet_select(ppu_thread& ppu, s32 nfds, vm::ptr<sys_net_fd_set
 						    //	rexcept.set(i);
 
 							signaled++;
-							g_fxo->get<network_context>().s_to_awake.emplace_back(&ppu);
+							sock->queue_wake(&ppu);
 							return true;
 						}
 
@@ -1647,7 +1651,7 @@ error_code sys_net_bnet_select(ppu_thread& ppu, s32 nfds, vm::ptr<sys_net_fd_set
 					return {};
 				}
 
-				std::lock_guard nw_lock(g_fxo->get<network_context>().s_nw_mutex);
+				std::lock_guard nw_lock(g_fxo->get<network_context>().mutex_thread_loop);
 
 				if (signaled)
 				{
@@ -1664,17 +1668,17 @@ error_code sys_net_bnet_select(ppu_thread& ppu, s32 nfds, vm::ptr<sys_net_fd_set
 		}
 	}
 
+	if (!has_timedout && !signaled)
+	{
+		return -SYS_NET_EINTR;
+	}
+
 	if (readfds)
 		*readfds = rread;
 	if (writefds)
 		*writefds = rwrite;
 	if (exceptfds)
 		*exceptfds = rexcept;
-
-	if (!has_timedout && !signaled)
-	{
-		return -SYS_NET_EINTR;
-	}
 
 	return not_an_error(signaled);
 }
@@ -1730,6 +1734,7 @@ error_code lv2_socket::abort_socket(s32 flags)
 		}
 
 		qcopy = std::move(queue);
+		queue = {};
 		events.store({});
 	}
 
@@ -1741,6 +1746,14 @@ error_code lv2_socket::abort_socket(s32 flags)
 		sys_net.warning("lv2_socket::abort_socket(): waking up \"%s\": (func: %s, r3=0x%x, r4=0x%x, r5=0x%x, r6=0x%x)", ppu->get_name(), ppu->current_function, ppu->gpr[3], ppu->gpr[4], ppu->gpr[5], ppu->gpr[6]);
 		ppu->gpr[3] = static_cast<u64>(-SYS_NET_EINTR);
 		lv2_obj::append(ppu.get());
+	}
+
+	const u32 num_waiters = qcopy.size();
+	if (num_waiters && (type == SYS_NET_SOCK_STREAM || type == SYS_NET_SOCK_DGRAM))
+	{
+		auto& nc = g_fxo->get<network_context>();
+		const u32 prev_value = nc.num_polls.fetch_sub(num_waiters);
+		ensure(prev_value >= num_waiters);
 	}
 
 	lv2_obj::awake_all();
@@ -1766,7 +1779,7 @@ error_code sys_net_abort(ppu_thread& ppu, s32 type, u64 arg, s32 flags)
 	{
 	case _socket:
 	{
-		std::lock_guard nw_lock(g_fxo->get<network_context>().s_nw_mutex);
+		std::lock_guard nw_lock(g_fxo->get<network_context>().mutex_thread_loop);
 
 		const auto sock = idm::get<lv2_socket>(static_cast<u32>(arg));
 
@@ -1807,7 +1820,7 @@ error_code sys_net_abort(ppu_thread& ppu, s32 type, u64 arg, s32 flags)
 		}
 
 		// Ensures the socket has no lingering copy from the network thread
-		g_fxo->get<network_context>().s_nw_mutex.lock_unlock();
+		g_fxo->get<network_context>().mutex_thread_loop.lock_unlock();
 
 		return not_an_error(::narrow<s32>(sockets.size()) - failed);
 	}

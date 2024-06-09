@@ -46,6 +46,7 @@ DYNAMIC_IMPORT_RENAME("Kernel32.dll", SetThreadDescriptionImport, "SetThreadDesc
 #include <time.h>
 #endif
 #ifdef __linux__
+#include <sys/syscall.h>
 #include <sys/timerfd.h>
 #include <unistd.h>
 #endif
@@ -1259,6 +1260,36 @@ bool handle_access_violation(u32 addr, bool is_writing, ucontext_t* context) noe
 
 	const auto cpu = get_current_cpu_thread();
 
+	struct spu_unsavable
+	{
+		spu_thread* _spu;
+
+		spu_unsavable(cpu_thread* cpu) noexcept
+			: _spu(cpu ? cpu->try_get<spu_thread>() : nullptr)
+		{
+			if (_spu)
+			{
+				if (_spu->unsavable)
+				{
+					_spu = nullptr;
+				}
+				else
+				{
+					// Must not be saved inside access violation handler because it is unpredictable
+					_spu->unsavable = true;
+				}
+			}
+		}
+
+		~spu_unsavable() noexcept
+		{
+			if (_spu)
+			{
+				_spu->unsavable = false;
+			}
+		}
+	} spu_protection{cpu};
+
 	if (addr < RAW_SPU_BASE_ADDR && vm::check_addr(addr) && rsx::g_access_violation_handler)
 	{
 		bool state_changed = false;
@@ -1489,7 +1520,7 @@ bool handle_access_violation(u32 addr, bool is_writing, ucontext_t* context) noe
 		return area->falloc(addr & -0x10000, 0x10000) || vm::check_addr(addr, is_writing ? vm::page_writable : vm::page_readable);
 	};
 
-	if (cpu && (cpu->id_type() == 1 || cpu->id_type() == 2))
+	if (cpu && (cpu->get_class() == thread_class::ppu || cpu->get_class() == thread_class::spu))
 	{
 		vm::temporary_unlock(*cpu);
 		u32 pf_port_id = 0;
@@ -1556,7 +1587,7 @@ bool handle_access_violation(u32 addr, bool is_writing, ucontext_t* context) noe
 			auto& pf_events = g_fxo->get<page_fault_event_entries>();
 
 			// De-schedule
-			if (cpu->id_type() == 1)
+			if (cpu->get_class() == thread_class::ppu)
 			{
 				cpu->state -= cpu_flag::signal; // Cannot use check_state here and signal must be removed if exists
 				lv2_obj::sleep(*cpu);
@@ -1580,7 +1611,7 @@ bool handle_access_violation(u32 addr, bool is_writing, ucontext_t* context) noe
 			sig_log.warning("Page_fault %s location 0x%x because of %s memory", is_writing ? "writing" : "reading",
 				addr, data3 == SYS_MEMORY_PAGE_FAULT_CAUSE_READ_ONLY ? "writing read-only" : "using unmapped");
 
-			if (cpu->id_type() == 1)
+			if (cpu->get_class() == thread_class::ppu)
 			{
 				if (const auto func = static_cast<ppu_thread*>(cpu)->current_function)
 				{
@@ -1630,12 +1661,12 @@ bool handle_access_violation(u32 addr, bool is_writing, ucontext_t* context) noe
 			return true;
 		}
 
-		if (cpu->id_type() == 2)
+		if (cpu->get_class() == thread_class::spu)
 		{
 			if (!g_tls_access_violation_recovered)
 			{
 				vm_log.notice("\n%s", dump_useful_thread_info());
-				vm_log.error("[%s] Access violation %s location 0x%x (%s)", cpu->get_name(), is_writing ? "writing" : "reading", addr, (is_writing && vm::check_addr(addr)) ? "read-only memory" : "unmapped memory");
+				vm_log.always()("[%s] Access violation %s location 0x%x (%s)", cpu->get_name(), is_writing ? "writing" : "reading", addr, (is_writing && vm::check_addr(addr)) ? "read-only memory" : "unmapped memory");
 			}
 
 			// TODO:
@@ -1677,7 +1708,7 @@ bool handle_access_violation(u32 addr, bool is_writing, ucontext_t* context) noe
 	// Do not log any further access violations in this case.
 	if (!g_tls_access_violation_recovered)
 	{
-		vm_log.fatal("Access violation %s location 0x%x (%s)", is_writing ? "writing" : (cpu && cpu->id_type() == 1 && cpu->get_pc() == addr ? "executing" : "reading"), addr, (is_writing && vm::check_addr(addr)) ? "read-only memory" : "unmapped memory");
+		vm_log.fatal("Access violation %s location 0x%x (%s)", is_writing ? "writing" : (cpu && cpu->get_class() == thread_class::ppu && cpu->get_pc() == addr ? "executing" : "reading"), addr, (is_writing && vm::check_addr(addr)) ? "read-only memory" : "unmapped memory");
 	}
 
 	while (Emu.IsPaused())
@@ -2040,6 +2071,12 @@ DECLARE(thread_ctrl::g_native_core_layout) { native_core_arrangement::undefined 
 
 void thread_base::start()
 {
+	m_sync.atomic_op([&](u32& v)
+	{
+		v &= ~static_cast<u32>(thread_state::mask);
+		v |= static_cast<u32>(thread_state::created);
+	});
+
 #ifdef _WIN32
 	m_thread = ::_beginthreadex(nullptr, 0, entry_point, this, CREATE_SUSPENDED, nullptr);
 	ensure(m_thread);
@@ -2186,7 +2223,10 @@ u64 thread_base::finalize(thread_state result_state) noexcept
 		return thread_ctrl::get_name_cached();
 	};
 
-	sig_log.notice("Thread time: %fs (%fGc); Faults: %u [rsx:%u, spu:%u]; [soft:%u hard:%u]; Switches:[vol:%u unvol:%u]; Wait:[%.3fs, spur:%u]",
+	const bool is_cpu_thread = !!cpu_thread::get_current();
+	auto& thread_log = (is_cpu_thread || g_tls_fault_all ? sig_log.notice : sig_log.trace);
+
+	thread_log("Thread time: %fs (%fGc); Faults: %u [rsx:%u, spu:%u]; [soft:%u hard:%u]; Switches:[vol:%u unvol:%u]; Wait:[%.3fs, spur:%u]",
 		time / 1000000000.,
 		cycles / 1000000000.,
 		g_tls_fault_all,
@@ -2420,7 +2460,7 @@ void thread_ctrl::wait_for_accurate(u64 usec)
 			break;
 		}
 
-		usec = (until - current).count();
+		usec = std::chrono::duration_cast<std::chrono::microseconds>(until - current).count();
 	}
 #endif
 }
@@ -2633,12 +2673,51 @@ void thread_base::exec()
 		sys_log.notice("\n%s", info);
 	}
 
+	std::string reason_buf;
+
+	if (auto ppu = cpu_thread::get_current<ppu_thread>())
+	{
+		if (auto func = ppu->current_function)
+		{
+			fmt::append(reason_buf, "%s (PPU: %s)", reason, func);
+		}
+	}
+
+	if (!reason_buf.empty())
+	{
+		reason = reason_buf;
+	}
+
 	sig_log.fatal("Thread terminated due to fatal error: %s", reason);
+
+	logs::listener::sync_all();
 
 	if (IsDebuggerPresent())
 	{
-		logs::listener::sync_all();
-		utils::trap();
+		// Prevent repeatedly halting the debugger in case multiple threads crashed at once
+		static atomic_t<u64> s_last_break = 0;
+		const u64 current_break = get_system_time() & -2;
+
+		if (s_last_break.fetch_op([current_break](u64& v)
+		{
+			if (current_break >= (v & -2) && current_break - (v & -2) >= 20'000'000)
+			{
+				v = current_break;
+				return true;
+			}
+
+			// Let's allow a single more thread to halt the debugger so the programmer sees the pattern
+			if (!(v & 1))
+			{
+				v |= 1;
+				return true;
+			}
+
+			return false;
+		}).second)
+		{
+			utils::trap();
+		}
 	}
 
 	if (const auto _this = g_tls_this_thread)
@@ -2833,7 +2912,7 @@ u64 thread_ctrl::get_affinity_mask(thread_class group)
 							spu_mask = 0b0000101010101010;
 							rsx_mask = 0b1000000000000000;
 						}
-						else
+						else // if (g_cfg.core.thread_scheduler == thread_scheduler_mode::old)
 						{
 							ppu_mask = 0b1111111100000000;
 							spu_mask = ppu_mask;
@@ -2874,7 +2953,7 @@ u64 thread_ctrl::get_affinity_mask(thread_class group)
 						spu_mask = 0b1111111100000000;
 						rsx_mask = 0b0000000000001111;
 					}
-					else
+					else // if (g_cfg.core.thread_scheduler == thread_scheduler_mode::old)
 					{
 						// Verified by more than one windows user on 16-thread CPU
 						ppu_mask = spu_mask = rsx_mask = (0b10101010101010101010101010101010 & all_cores_mask);
@@ -2888,7 +2967,7 @@ u64 thread_ctrl::get_affinity_mask(thread_class group)
 						spu_mask = 0b111111110000;
 						rsx_mask = 0b000000000011;
 					}
-					else
+					else // if (g_cfg.core.thread_scheduler == thread_scheduler_mode::old)
 					{
 						ppu_mask = spu_mask = rsx_mask = all_cores_mask;
 					}

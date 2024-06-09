@@ -9,12 +9,13 @@ LOG_CHANNEL(np_cache);
 
 namespace np
 {
-	memberbin_cache::memberbin_cache(SceNpMatching2RoomMemberBinAttrInternal* sce_memberbin)
+	memberbin_cache::memberbin_cache(const SceNpMatching2RoomMemberBinAttrInternal* sce_memberbin)
 	{
-		id              = sce_memberbin->data.id;
+		ensure(sce_memberbin && (sce_memberbin->data.ptr || !sce_memberbin->data.size));
+
+		id = sce_memberbin->data.id;
 		updateDate.tick = sce_memberbin->updateDate.tick;
-		data.resize(sce_memberbin->data.size);
-		memcpy(data.data(), sce_memberbin->data.ptr.get_ptr(), sce_memberbin->data.size);
+		data = std::vector<u8>(sce_memberbin->data.ptr.get_ptr(), sce_memberbin->data.ptr.get_ptr() + sce_memberbin->data.size);
 	}
 
 	member_cache::member_cache(const SceNpMatching2RoomMemberDataInternal* sce_member)
@@ -129,14 +130,14 @@ namespace np
 
 		const auto& room = rooms[room_id];
 
-		SceNpMatching2RoomSlotInfo slots;
+		SceNpMatching2RoomSlotInfo slots{};
 
 		slots.roomId = room_id;
 
 		SceNpMatching2RoomJoinedSlotMask join_mask = 0;
 		for (const auto& member : room.members)
 		{
-			join_mask |= (1 << ((member.first >> 4) - 1));
+			join_mask |= (1ull << ((member.first >> 4) - 1));
 		}
 		slots.joinedSlotMask   = join_mask;
 		slots.passwordSlotMask = room.mask_password;
@@ -219,7 +220,7 @@ namespace np
 		return {CELL_OK, rooms[room_id].password};
 	}
 
-	error_code cache_manager::get_member_and_attrs(SceNpMatching2RoomId room_id, SceNpMatching2RoomMemberId member_id, const std::vector<SceNpMatching2AttributeId>& binattrs_list, SceNpMatching2RoomMemberDataInternal* ptr_member, u32 addr_data, u32 size_data)
+	error_code cache_manager::get_member_and_attrs(SceNpMatching2RoomId room_id, SceNpMatching2RoomMemberId member_id, const std::vector<SceNpMatching2AttributeId>& binattrs_list, SceNpMatching2RoomMemberDataInternal* ptr_member, u32 addr_data, u32 size_data, bool include_onlinename, bool include_avatarurl)
 	{
 		std::lock_guard lock(mutex);
 
@@ -247,19 +248,28 @@ namespace np
 			ptr_member->flagAttr      = member.flagAttr;
 		}
 
-		u32 needed_data_size = sizeof(SceNpOnlineName) + sizeof(SceNpAvatarUrl) + sizeof(SceNpMatching2RoomGroup);
+		u32 needed_data_size = 0;
+
+		if (include_onlinename && member.userInfo.onlineName)
+			needed_data_size += sizeof(SceNpOnlineName);
+
+		if (include_avatarurl && member.userInfo.avatarUrl)
+			needed_data_size += sizeof(SceNpAvatarUrl);
+
+		if (member.group_id)
+			needed_data_size += sizeof(SceNpMatching2RoomGroup);
 
 		for (usz i = 0; i < binattrs_list.size(); i++)
 		{
 			if (member.bins.contains(binattrs_list[i]))
 			{
-				needed_data_size += (sizeof(SceNpMatching2RoomMemberBinAttrInternal) + ::at32(member.bins, binattrs_list[i]).data.size());
+				needed_data_size += ::narrow<u32>(sizeof(SceNpMatching2RoomMemberBinAttrInternal) + ::at32(member.bins, binattrs_list[i]).data.size());
 			}
 		}
 
 		if (!addr_data || !ptr_member)
 		{
-			return needed_data_size;
+			return not_an_error(needed_data_size);
 		}
 
 		if (size_data < needed_data_size)
@@ -270,13 +280,13 @@ namespace np
 		memory_allocator mem;
 		mem.setup(vm::ptr<void>(vm::cast(addr_data)), size_data);
 
-		if (member.userInfo.onlineName)
+		if (include_onlinename && member.userInfo.onlineName)
 		{
 			ptr_member->userInfo.onlineName.set(mem.allocate(sizeof(SceNpOnlineName)));
 			memcpy(ptr_member->userInfo.onlineName.get_ptr(), &member.userInfo.onlineName.value(), sizeof(SceNpOnlineName));
 		}
 
-		if (member.userInfo.avatarUrl)
+		if (include_avatarurl && member.userInfo.avatarUrl)
 		{
 			ptr_member->userInfo.avatarUrl.set(mem.allocate(sizeof(SceNpAvatarUrl)));
 			memcpy(ptr_member->userInfo.avatarUrl.get_ptr(), &member.userInfo.avatarUrl.value(), sizeof(SceNpAvatarUrl));
@@ -311,15 +321,15 @@ namespace np
 					const auto& bin = ::at32(member.bins, binattrs_list[i]);
 					bin_ptr[actual_cnt].updateDate.tick = bin.updateDate.tick;
 					bin_ptr[actual_cnt].data.id         = bin.id;
-					bin_ptr[actual_cnt].data.size       = bin.data.size();
-					bin_ptr[actual_cnt].data.ptr.set(mem.allocate(bin.data.size()));
-					memcpy(bin_ptr[actual_cnt].data.ptr.get_ptr(), bin.data.data(), bin.data.size());
+					bin_ptr[actual_cnt].data.size       = ::size32(bin.data);
+					bin_ptr[actual_cnt].data.ptr.set(mem.allocate(::size32(bin.data)));
+					std::memcpy(bin_ptr[actual_cnt].data.ptr.get_ptr(), bin.data.data(), bin.data.size());
 					actual_cnt++;
 				}
 			}
 		}
 
-		return needed_data_size;
+		return not_an_error(needed_data_size);
 	}
 
 	std::pair<error_code, std::optional<SceNpId>> cache_manager::get_npid(u64 room_id, u16 member_id)

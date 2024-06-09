@@ -72,8 +72,8 @@ namespace
 	}*/
 }
 
-ds4_pad_handler::ds4_pad_handler()
-    : hid_pad_handler<DS4Device>(pad_handler::ds4, {SONY_DS4_ID_0, SONY_DS4_ID_1, SONY_DS4_ID_2, ZEROPLUS_ID_0})
+ds4_pad_handler::ds4_pad_handler(bool emulation)
+    : hid_pad_handler<DS4Device>(pad_handler::ds4, emulation, {SONY_DS4_ID_0, SONY_DS4_ID_1, SONY_DS4_ID_2, ZEROPLUS_ID_0})
 {
 	// Unique names for the config files and our pad settings dialog
 	button_list =
@@ -164,6 +164,8 @@ void ds4_pad_handler::init_config(cfg_pad* cfg)
 	cfg->pressure_intensity_button.def = ::at32(button_list, DS4KeyCodes::None);
 
 	// Set default misc variables
+	cfg->lstick_anti_deadzone.def = static_cast<u32>(0.13 * thumb_max); // 13%
+	cfg->rstick_anti_deadzone.def = static_cast<u32>(0.13 * thumb_max); // 13%
 	cfg->lstickdeadzone.def    = 40; // between 0 and 255
 	cfg->rstickdeadzone.def    = 40; // between 0 and 255
 	cfg->ltriggerthreshold.def = 0;  // between 0 and 255

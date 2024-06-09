@@ -19,8 +19,8 @@
 
 LOG_CHANNEL(evdev_log, "evdev");
 
-evdev_joystick_handler::evdev_joystick_handler()
-    : PadHandlerBase(pad_handler::evdev)
+evdev_joystick_handler::evdev_joystick_handler(bool emulation)
+    : PadHandlerBase(pad_handler::evdev, emulation)
 {
 	init_configs();
 
@@ -85,6 +85,8 @@ void evdev_joystick_handler::init_config(cfg_pad* cfg)
 	cfg->pressure_intensity_button.def = ::at32(button_list, NO_BUTTON);
 
 	// Set default misc variables
+	cfg->lstick_anti_deadzone.def = static_cast<u32>(0.13 * thumb_max); // 13%
+	cfg->rstick_anti_deadzone.def = static_cast<u32>(0.13 * thumb_max); // 13%
 	cfg->lstickdeadzone.def    = 30; // between 0 and 255
 	cfg->rstickdeadzone.def    = 30; // between 0 and 255
 	cfg->ltriggerthreshold.def = 0;  // between 0 and 255
@@ -261,16 +263,17 @@ std::unordered_map<u64, std::pair<u16, bool>> evdev_joystick_handler::GetButtonV
 
 		const int min = libevdev_get_abs_minimum(dev, code);
 		const int max = libevdev_get_abs_maximum(dev, code);
+		const int flat = libevdev_get_abs_flat(dev, code);
 
 		// Triggers do not need handling of negative values
 		if (min >= 0 && !m_positive_axis.contains(code))
 		{
-			const float fvalue = ScaledInput(val, min, max);
+			const float fvalue = ScaledInput(val, min, max, flat);
 			button_values.emplace(code, std::make_pair<u16, bool>(static_cast<u16>(fvalue), false));
 			continue;
 		}
 
-		const float fvalue = ScaledInput2(val, min, max);
+		const float fvalue = ScaledAxisInput(val, min, max, flat);
 		if (fvalue < 0)
 			button_values.emplace(code, std::make_pair<u16, bool>(static_cast<u16>(std::abs(fvalue)), true));
 		else
@@ -939,6 +942,7 @@ void evdev_joystick_handler::get_mapping(const pad_ensemble& binding)
 				{
 					axis_wrapper->min = libevdev_get_abs_minimum(dev, evt.code);
 					axis_wrapper->max = libevdev_get_abs_maximum(dev, evt.code);
+					axis_wrapper->flat = libevdev_get_abs_flat(dev, evt.code);
 					axis_wrapper->is_initialized = true;
 
 					// Triggers do not need handling of negative values
@@ -951,7 +955,7 @@ void evdev_joystick_handler::get_mapping(const pad_ensemble& binding)
 				// Triggers do not need handling of negative values
 				if (axis_wrapper->is_trigger)
 				{
-					const u16 new_value = static_cast<u16>(ScaledInput(evt.value, axis_wrapper->min, axis_wrapper->max));
+					const u16 new_value = static_cast<u16>(ScaledInput(evt.value, axis_wrapper->min, axis_wrapper->max, axis_wrapper->flat));
 					u16& key_value = axis_wrapper->values[false];
 
 					if (key_value != new_value)
@@ -962,7 +966,7 @@ void evdev_joystick_handler::get_mapping(const pad_ensemble& binding)
 				}
 				else
 				{
-					const float fvalue = ScaledInput2(evt.value, axis_wrapper->min, axis_wrapper->max);
+					const float fvalue = ScaledAxisInput(evt.value, axis_wrapper->min, axis_wrapper->max, axis_wrapper->flat);
 					const bool is_negative = fvalue < 0;
 
 					const u16 new_value_0 = static_cast<u16>(std::abs(fvalue));
@@ -1054,8 +1058,9 @@ u16 evdev_joystick_handler::get_sensor_value(const libevdev* dev, const AnalogSe
 	{
 		const int min = libevdev_get_abs_minimum(dev, evt.code);
 		const int max = libevdev_get_abs_maximum(dev, evt.code);
+		const int flat = libevdev_get_abs_flat(dev, evt.code);
 
-		s16 value = ScaledInput(evt.value, min, max, 1023.0f);
+		s16 value = ScaledInput(evt.value, min, max, flat, 1023.0f);
 
 		if (sensor.m_mirrored)
 		{
@@ -1207,8 +1212,8 @@ void evdev_joystick_handler::apply_input_events(const std::shared_ptr<Pad>& pad)
 	u16 lx, ly, rx, ry;
 
 	// Normalize and apply pad squircling
-	convert_stick_values(lx, ly, stick_val[0], stick_val[1], cfg->lstickdeadzone, cfg->lpadsquircling);
-	convert_stick_values(rx, ry, stick_val[2], stick_val[3], cfg->rstickdeadzone, cfg->rpadsquircling);
+	convert_stick_values(lx, ly, stick_val[0], stick_val[1], cfg->lstickdeadzone, cfg->lstick_anti_deadzone, cfg->lpadsquircling);
+	convert_stick_values(rx, ry, stick_val[2], stick_val[3], cfg->rstickdeadzone, cfg->rstick_anti_deadzone, cfg->rpadsquircling);
 
 	pad->m_sticks[0].m_value = lx;
 	pad->m_sticks[1].m_value = 255 - ly;

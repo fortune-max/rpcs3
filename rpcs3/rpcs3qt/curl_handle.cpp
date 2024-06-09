@@ -1,3 +1,4 @@
+#include "stdafx.h"
 #include "curl_handle.h"
 #include "Emu/system_utils.hpp"
 #include "util/logs.hpp"
@@ -11,7 +12,7 @@ LOG_CHANNEL(network_log, "NET");
 namespace rpcs3::curl
 {
 
-curl_handle::curl_handle(QObject* parent) : QObject(parent)
+curl_handle::curl_handle()
 {
 	reset_error_buffer();
 
@@ -26,11 +27,9 @@ curl_handle::curl_handle(QObject* parent) : QObject(parent)
 	if (err != CURLE_OK) network_log.error("curl_easy_setopt(CURLOPT_VERBOSE, %d): %s", g_curl_verbose, curl_easy_strerror(err));
 
 #ifdef _WIN32
-	// This shouldn't be needed on linux
-	const std::string path_to_cert = rpcs3::utils::get_exe_dir() + "cacert.pem";
-
-	err = curl_easy_setopt(m_curl, CURLOPT_CAINFO, path_to_cert.data());
-	if (err != CURLE_OK) network_log.error("curl_easy_setopt(CURLOPT_CAINFO, %s) error: %s", path_to_cert, curl_easy_strerror(err));
+	// Tell curl to use the native CA store for certificate verification
+	err = curl_easy_setopt(m_curl, CURLOPT_SSL_OPTIONS, CURLSSLOPT_NATIVE_CA);
+	if (err != CURLE_OK) network_log.error("curl_easy_setopt(CURLOPT_SSL_OPTIONS): %s", curl_easy_strerror(err));
 #endif
 }
 
@@ -50,7 +49,7 @@ void curl_handle::reset_error_buffer()
 	m_error_buffer[0] = 0;
 }
 
-std::string curl_handle::get_verbose_error(CURLcode code)
+std::string curl_handle::get_verbose_error(CURLcode code) const
 {
 	if (m_uses_error_buffer)
 	{

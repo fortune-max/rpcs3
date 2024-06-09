@@ -186,7 +186,7 @@ namespace psf
 		if (!static_cast<bool>(cond)) \
 		{ \
 			if (err != error::stream) \
-				psf_log.error("Error loading PSF '%s': %s%s", filename, err, src_loc{__builtin_LINE(), __builtin_COLUMN(), __builtin_FILE(), __builtin_FUNCTION()}); \
+				psf_log.error("Error loading PSF '%s': %s%s", filename, err, std::source_location::current()); \
 			result.sfo.clear(); \
 			result.errc = err; \
 			return result; \
@@ -295,7 +295,7 @@ namespace psf
 
 		for (const auto& entry : psf)
 		{
-			def_table_t index;
+			def_table_t index{};
 			index.key_off = ::narrow<u32>(key_offset);
 			index.param_fmt = entry.second.type();
 			index.param_len = entry.second.size();
@@ -313,7 +313,7 @@ namespace psf
 		key_offset = utils::align(key_offset, 4);
 
 		// Generate header
-		header_t header;
+		header_t header{};
 		header.magic = "\0PSF"_u32;
 		header.version = 0x101;
 		header.off_key_table = ::narrow<u32>(sizeof(header_t) + sizeof(def_table_t) * psf.size());
@@ -392,7 +392,7 @@ namespace psf
 		return found->second.as_integer();
 	}
 
-	bool check_registry(const registry& psf, std::function<bool(bool ok, const std::string& key, const entry& value)> validate, u32 line, u32 col, const char* file, const char* func)
+	bool check_registry(const registry& psf, std::function<bool(bool ok, const std::string& key, const entry& value)> validate, std::source_location src_loc)
 	{
 		bool psf_ok = true;
 
@@ -413,12 +413,12 @@ namespace psf
 			{
 				if (value.type() == format::string)
 				{
-					psf_log.error("Entry '%s' is invalid: string='%s'.%s", key, value.as_string(), src_loc{line , col, file, func});
+					psf_log.error("Entry '%s' is invalid: string='%s'.%s", key, value.as_string(), src_loc);
 				}
 				else
 				{
 					// TODO: Better logging of other types
-					psf_log.error("Entry %s is invalid.%s", key, value.as_string(), src_loc{line , col, file, func});
+					psf_log.error("Entry %s is invalid.%s", key, value.as_string(), src_loc);
 				}
 			}
 

@@ -46,6 +46,64 @@
 #endif
 #endif
 
+// LUTs for SPU instructions
+
+const u32 spu_frest_fraction_lut[32] =
+{
+	0x7FFBE0, 0x7F87A6, 0x70EF72, 0x708B40, 0x638B12, 0x633AEA, 0x5792C4, 0x574AA0,
+	0x4CCA7E, 0x4C9262, 0x430A44, 0x42D62A, 0x3A2E12, 0x39FDFA, 0x3215E4, 0x31F1D2,
+	0x2AA9BE, 0x2A85AC, 0x23D59A, 0x23BD8E, 0x1D8576, 0x1D8576, 0x17AD5A, 0x17AD5A,
+	0x124543, 0x124543, 0x0D392D, 0x0D392D, 0x08851A, 0x08851A, 0x041D07, 0x041D07
+};
+
+const u32 spu_frest_exponent_lut[256] =
+{
+	0x7F800000, 0x7E000000, 0x7D800000, 0x7D000000, 0x7C800000, 0x7C000000, 0x7B800000, 0x7B000000, 0x7A800000, 0x7A000000, 0x79800000, 0x79000000, 0x78800000, 0x78000000, 0x77800000, 0x77000000,
+	0x76800000, 0x76000000, 0x75800000, 0x75000000, 0x74800000, 0x74000000, 0x73800000, 0x73000000, 0x72800000, 0x72000000, 0x71800000, 0x71000000, 0x70800000, 0x70000000, 0x6F800000, 0x6F000000,
+	0x6E800000, 0x6E000000, 0x6D800000, 0x6D000000, 0x6C800000, 0x6C000000, 0x6B800000, 0x6B000000, 0x6A800000, 0x6A000000, 0x69800000, 0x69000000, 0x68800000, 0x68000000, 0x67800000, 0x67000000,
+	0x66800000, 0x66000000, 0x65800000, 0x65000000, 0x64800000, 0x64000000, 0x63800000, 0x63000000, 0x62800000, 0x62000000, 0x61800000, 0x61000000, 0x60800000, 0x60000000, 0x5F800000, 0x5F000000,
+	0x5E800000, 0x5E000000, 0x5D800000, 0x5D000000, 0x5C800000, 0x5C000000, 0x5B800000, 0x5B000000, 0x5A800000, 0x5A000000, 0x59800000, 0x59000000, 0x58800000, 0x58000000, 0x57800000, 0x57000000,
+	0x56800000, 0x56000000, 0x55800000, 0x55000000, 0x54800000, 0x54000000, 0x53800000, 0x53000000, 0x52800000, 0x52000000, 0x51800000, 0x51000000, 0x50800000, 0x50000000, 0x4F800000, 0x4F000000,
+	0x4E800000, 0x4E000000, 0x4D800000, 0x4D000000, 0x4C800000, 0x4C000000, 0x4B800000, 0x4B000000, 0x4A800000, 0x4A000000, 0x49800000, 0x49000000, 0x48800000, 0x48000000, 0x47800000, 0x47000000,
+	0x46800000, 0x46000000, 0x45800000, 0x45000000, 0x44800000, 0x44000000, 0x43800000, 0x43000000, 0x42800000, 0x42000000, 0x41800000, 0x41000000, 0x40800000, 0x40000000, 0x3F800000, 0x3F000000,
+	0x3E800000, 0x3E000000, 0x3D800000, 0x3D000000, 0x3C800000, 0x3C000000, 0x3B800000, 0x3B000000, 0x3A800000, 0x3A000000, 0x39800000, 0x39000000, 0x38800000, 0x38000000, 0x37800000, 0x37000000,
+	0x36800000, 0x36000000, 0x35800000, 0x35000000, 0x34800000, 0x34000000, 0x33800000, 0x33000000, 0x32800000, 0x32000000, 0x31800000, 0x31000000, 0x30800000, 0x30000000, 0x2F800000, 0x2F000000,
+	0x2E800000, 0x2E000000, 0x2D800000, 0x2D000000, 0x2C800000, 0x2C000000, 0x2B800000, 0x2B000000, 0x2A800000, 0x2A000000, 0x29800000, 0x29000000, 0x28800000, 0x28000000, 0x27800000, 0x27000000,
+	0x26800000, 0x26000000, 0x25800000, 0x25000000, 0x24800000, 0x24000000, 0x23800000, 0x23000000, 0x22800000, 0x22000000, 0x21800000, 0x21000000, 0x20800000, 0x20000000, 0x1F800000, 0x1F000000,
+	0x1E800000, 0x1E000000, 0x1D800000, 0x1D000000, 0x1C800000, 0x1C000000, 0x1B800000, 0x1B000000, 0x1A800000, 0x1A000000, 0x19800000, 0x19000000, 0x18800000, 0x18000000, 0x17800000, 0x17000000,
+	0x16800000, 0x16000000, 0x15800000, 0x15000000, 0x14800000, 0x14000000, 0x13800000, 0x13000000, 0x12800000, 0x12000000, 0x11800000, 0x11000000, 0x10800000, 0x10000000, 0x0F800000, 0x0F000000,
+	0x0E800000, 0x0E000000, 0x0D800000, 0x0D000000, 0x0C800000, 0x0C000000, 0x0B800000, 0x0B000000, 0x0A800000, 0x0A000000, 0x09800000, 0x09000000, 0x08800000, 0x08000000, 0x07800000, 0x07000000,
+	0x06800000, 0x06000000, 0x05800000, 0x05000000, 0x04800000, 0x04000000, 0x03800000, 0x03000000, 0x02800000, 0x02000000, 0x01800000, 0x01000000, 0x00800000, 0x00000000, 0x00000000, 0x00000000
+};
+
+const u32 spu_frsqest_fraction_lut[64] =
+{
+	0x350160, 0x34E954, 0x2F993D, 0x2F993D, 0x2AA523, 0x2AA523, 0x26190D, 0x26190D, 0x21E4F9, 0x21E4F9, 0x1E00E9, 0x1E00E9, 0x1A5CD9, 0x1A5CD9, 0x16F8CB, 0x16F8CB,
+	0x13CCC0, 0x13CCC0, 0x10CCB3, 0x10CCB3, 0x0E00AA, 0x0E00AA, 0x0B58A1, 0x0B58A1, 0x08D498, 0x08D498, 0x067491, 0x067491, 0x043089, 0x043089, 0x020C83, 0x020C83,
+	0x7FFDF4, 0x7FD1DE, 0x7859C8, 0x783DBA, 0x71559C, 0x71559C, 0x6AE57C, 0x6AE57C, 0x64F561, 0x64F561, 0x5F7149, 0x5F7149, 0x5A4D33, 0x5A4D33, 0x55811F, 0x55811F,
+	0x51050F, 0x51050F, 0x4CC8FE, 0x4CC8FE, 0x48D0F0, 0x48D0F0, 0x4510E4, 0x4510E4, 0x4180D7, 0x4180D7, 0x3E24CC, 0x3E24CC, 0x3AF4C3, 0x3AF4C3, 0x37E8BA, 0x37E8BA
+};
+
+const u32 spu_frsqest_exponent_lut[256] =
+{
+	0x7F800000, 0x5E800000, 0x5E800000, 0x5E000000, 0x5E000000, 0x5D800000, 0x5D800000, 0x5D000000, 0x5D000000, 0x5C800000, 0x5C800000, 0x5C000000, 0x5C000000, 0x5B800000, 0x5B800000, 0x5B000000,
+	0x5B000000, 0x5A800000, 0x5A800000, 0x5A000000, 0x5A000000, 0x59800000, 0x59800000, 0x59000000, 0x59000000, 0x58800000, 0x58800000, 0x58000000, 0x58000000, 0x57800000, 0x57800000, 0x57000000,
+	0x57000000, 0x56800000, 0x56800000, 0x56000000, 0x56000000, 0x55800000, 0x55800000, 0x55000000, 0x55000000, 0x54800000, 0x54800000, 0x54000000, 0x54000000, 0x53800000, 0x53800000, 0x53000000,
+	0x53000000, 0x52800000, 0x52800000, 0x52000000, 0x52000000, 0x51800000, 0x51800000, 0x51000000, 0x51000000, 0x50800000, 0x50800000, 0x50000000, 0x50000000, 0x4F800000, 0x4F800000, 0x4F000000,
+	0x4F000000, 0x4E800000, 0x4E800000, 0x4E000000, 0x4E000000, 0x4D800000, 0x4D800000, 0x4D000000, 0x4D000000, 0x4C800000, 0x4C800000, 0x4C000000, 0x4C000000, 0x4B800000, 0x4B800000, 0x4B000000,
+	0x4B000000, 0x4A800000, 0x4A800000, 0x4A000000, 0x4A000000, 0x49800000, 0x49800000, 0x49000000, 0x49000000, 0x48800000, 0x48800000, 0x48000000, 0x48000000, 0x47800000, 0x47800000, 0x47000000,
+	0x47000000, 0x46800000, 0x46800000, 0x46000000, 0x46000000, 0x45800000, 0x45800000, 0x45000000, 0x45000000, 0x44800000, 0x44800000, 0x44000000, 0x44000000, 0x43800000, 0x43800000, 0x43000000,
+	0x43000000, 0x42800000, 0x42800000, 0x42000000, 0x42000000, 0x41800000, 0x41800000, 0x41000000, 0x41000000, 0x40800000, 0x40800000, 0x40000000, 0x40000000, 0x3F800000, 0x3F800000, 0x3F000000,
+	0x3F000000, 0x3E800000, 0x3E800000, 0x3E000000, 0x3E000000, 0x3D800000, 0x3D800000, 0x3D000000, 0x3D000000, 0x3C800000, 0x3C800000, 0x3C000000, 0x3C000000, 0x3B800000, 0x3B800000, 0x3B000000,
+	0x3B000000, 0x3A800000, 0x3A800000, 0x3A000000, 0x3A000000, 0x39800000, 0x39800000, 0x39000000, 0x39000000, 0x38800000, 0x38800000, 0x38000000, 0x38000000, 0x37800000, 0x37800000, 0x37000000,
+	0x37000000, 0x36800000, 0x36800000, 0x36000000, 0x36000000, 0x35800000, 0x35800000, 0x35000000, 0x35000000, 0x34800000, 0x34800000, 0x34000000, 0x34000000, 0x33800000, 0x33800000, 0x33000000,
+	0x33000000, 0x32800000, 0x32800000, 0x32000000, 0x32000000, 0x31800000, 0x31800000, 0x31000000, 0x31000000, 0x30800000, 0x30800000, 0x30000000, 0x30000000, 0x2F800000, 0x2F800000, 0x2F000000,
+	0x2F000000, 0x2E800000, 0x2E800000, 0x2E000000, 0x2E000000, 0x2D800000, 0x2D800000, 0x2D000000, 0x2D000000, 0x2C800000, 0x2C800000, 0x2C000000, 0x2C000000, 0x2B800000, 0x2B800000, 0x2B000000,
+	0x2B000000, 0x2A800000, 0x2A800000, 0x2A000000, 0x2A000000, 0x29800000, 0x29800000, 0x29000000, 0x29000000, 0x28800000, 0x28800000, 0x28000000, 0x28000000, 0x27800000, 0x27800000, 0x27000000,
+	0x27000000, 0x26800000, 0x26800000, 0x26000000, 0x26000000, 0x25800000, 0x25800000, 0x25000000, 0x25000000, 0x24800000, 0x24800000, 0x24000000, 0x24000000, 0x23800000, 0x23800000, 0x23000000,
+	0x23000000, 0x22800000, 0x22800000, 0x22000000, 0x22000000, 0x21800000, 0x21800000, 0x21000000, 0x21000000, 0x20800000, 0x20800000, 0x20000000, 0x20000000, 0x1F800000, 0x1F800000, 0x1F000000
+};
+
 using spu_rdata_t = decltype(spu_thread::rdata);
 
 template <>
@@ -107,6 +165,17 @@ void fmt_class_string<spu_block_hash>::format(std::string& out, u64 arg)
 
 	// Print chunk address from lowest 16 bits
 	fmt::append(out, "...chunk-0x%05x", (arg & 0xffff) * 4);
+}
+
+enum class spu_block_hash_short : u64{};
+
+template <>
+void fmt_class_string<spu_block_hash_short>::format(std::string& out, u64 arg)
+{
+	fmt::append(out, "%s", fmt::base57(be_t<u64>{arg}));
+
+	// Print only 7 hash characters out of 11 (which covers roughly 48 bits)
+	out.resize(out.size() - 4);
 }
 
 // Verify AVX availability for TSX transactions
@@ -390,11 +459,6 @@ namespace vm
 	{
 		if (range_lock)
 		{
-			if (!*range_lock)
-			{
-				return;
-			}
-
 			g_range_lock_bits[1] &= ~(1ull << (range_lock - g_range_lock_set));
 			range_lock->release(0);
 			return;
@@ -1523,6 +1587,19 @@ void spu_thread::cpu_on_stop()
 		dump_all(ret);
 		spu_log.notice("thread context: %s", ret);
 	}
+
+	if (is_stopped(state - cpu_flag::stop))
+	{
+		if (stx == 0 && ftx == 0 && last_succ == 0 && last_fail == 0)
+		{
+			perf_log.notice("SPU thread perf stats are not available.");
+		}
+		else
+		{
+			perf_log.notice("Perf stats for transactions: success %u, failure %u", stx, ftx);
+			perf_log.notice("Perf stats for PUTLLC reload: success %u, failure %u", last_succ, last_fail);
+		}
+	}
 }
 
 void spu_thread::cpu_init()
@@ -1603,6 +1680,7 @@ void spu_thread::cpu_return()
 
 		if (ensure(group->running)-- == 1)
 		{
+			u32 last_stop = 0;
 			{
 				lv2_obj::notify_all_t notify;
 				std::lock_guard lock(group->mutex);
@@ -1632,7 +1710,17 @@ void spu_thread::cpu_return()
 					exit_status.set_value(last_exit_status);
 				}
 
-				group->stop_count++;
+				last_stop = group->stop_count;
+
+				if (last_stop == umax)
+				{
+					// Restart with some high count to preserve some meaning
+					group->stop_count = 1000;
+				}
+				else
+				{
+					group->stop_count++;
+				}
 
 				if (const auto ppu = std::exchange(group->waiter, nullptr))
 				{
@@ -1646,6 +1734,12 @@ void spu_thread::cpu_return()
 
 			// Notify on last thread stopped
 			group->stop_count.notify_all();
+
+			// Wait for terminators manually if needed (ensuring they quit before value-wrapping)
+			while (last_stop == umax && group->wait_term_count)
+			{
+				std::this_thread::yield();
+			}
 		}
 		else if (status_npc.load().status >> 16 == SYS_SPU_THREAD_STOP_THREAD_EXIT)
 		{
@@ -1693,6 +1787,12 @@ void spu_thread::cpu_task()
 		}
 
 		const auto type = cpu->get_type();
+
+		if (g_cfg.core.spu_prof)
+		{
+			return fmt::format("%sSPU[0x%07x] Thread (%s) [0x%05x: %s]", type >= spu_type::raw ? type == spu_type::isolated ? "Iso" : "Raw" : "", cpu->lv2_id, *name_cache.get(), cpu->pc, spu_block_hash_short{atomic_storage<u64>::load(cpu->block_hash)});
+		}
+
 		return fmt::format("%sSPU[0x%07x] Thread (%s) [0x%05x]", type >= spu_type::raw ? type == spu_type::isolated ? "Iso" : "Raw" : "", cpu->lv2_id, *name_cache.get(), cpu->pc);
 	};
 
@@ -1730,7 +1830,10 @@ void spu_thread::cpu_task()
 			spu_runtime::g_gateway(*this, _ptr<u8>(0), nullptr);
 		}
 
-		unsavable = false;
+		if (unsavable && is_stopped(state - cpu_flag::stop))
+		{
+			spu_log.warning("Aborting unsaveable state");
+		}
 
 		// Print some stats
 		(!group || group->stop_count < 5 ? spu_log.notice : spu_log.trace)("Stats: Block Weight: %u (Retreats: %u);", block_counter, block_failure);
@@ -1769,7 +1872,10 @@ void spu_thread::cpu_work()
 
 	if (has_active_local_bps)
 	{
-		if (local_breakpoints[pc / 4])
+		const u32 pos_at = pc / 4;
+		const u32 pos_bit = 1u << (pos_at % 8);
+
+		if (local_breakpoints[pos_at / 8] & pos_bit)
 		{
 			// Ignore repeatations until a different instruction is issued
 			if (pc != current_bp_pc)
@@ -1890,9 +1996,6 @@ spu_thread::~spu_thread()
 	shm->unmap(ls);
 	shm->unmap(ls - SPU_LS_SIZE);
 	utils::memory_release(ls - SPU_LS_SIZE * 2, SPU_LS_SIZE * 5);
-
-	perf_log.notice("Perf stats for transactions: success %u, failure %u", stx, ftx);
-	perf_log.notice("Perf stats for PUTLLC reload: success %u, failure %u", last_succ, last_fail);
 }
 
 u8* spu_thread::map_ls(utils::shm& shm, void* ptr)
@@ -1981,7 +2084,7 @@ spu_thread::spu_thread(utils::serial& ar, lv2_spu_group* group)
 	: cpu_thread(idm::last_id())
 	, group(group)
 	, index(ar)
-	, thread_type(group ? spu_type::threaded : ar.operator u8() ? spu_type::isolated : spu_type::raw)
+	, thread_type(group ? spu_type::threaded : ar.pop<u8>() ? spu_type::isolated : spu_type::raw)
 	, shm(ensure(vm::get(vm::spu)->peek(vm_offset()).second))
 	, ls(map_ls(*this->shm))
 	, option(ar)
@@ -2022,6 +2125,20 @@ spu_thread::spu_thread(utils::serial& ar, lv2_spu_group* group)
 
 	serialize_common(ar);
 
+	raddr = ::narrow<u32>(ar.pop<u64>());
+
+	if (raddr)
+	{
+		// Acquire reservation
+		if (!vm::check_addr(raddr))
+		{
+			fmt::throw_exception("SPU Serialization: Reservation address is not accessible! (addr=0x%x)", raddr);
+		}
+
+		rtime = vm::reservation_acquire(raddr);
+		mov_rdata(rdata, *vm::get_super_ptr<spu_rdata_t>(raddr));
+	}
+
 	status_npc.raw().npc = pc | u8{interrupts_enabled};
 
 	if (get_type() == spu_type::threaded)
@@ -2029,12 +2146,12 @@ spu_thread::spu_thread(utils::serial& ar, lv2_spu_group* group)
 		for (auto& pair : spuq)
 		{
 			ar(pair.first);
-			pair.second = idm::get_unlocked<lv2_obj, lv2_event_queue>(ar.operator u32());
+			pair.second = idm::get_unlocked<lv2_obj, lv2_event_queue>(ar.pop<u32>());
 		}
 
 		for (auto& q : spup)
 		{
-			q = idm::get_unlocked<lv2_obj, lv2_event_queue>(ar.operator u32());
+			q = idm::get_unlocked<lv2_obj, lv2_event_queue>(ar.pop<u32>());
 		}
 	}
 	else
@@ -2042,7 +2159,7 @@ spu_thread::spu_thread(utils::serial& ar, lv2_spu_group* group)
 		for (spu_int_ctrl_t& ctrl : int_ctrl)
 		{
 			ar(ctrl.mask, ctrl.stat);
-			ctrl.tag = idm::get_unlocked<lv2_obj, lv2_int_tag>(ar.operator u32());
+			ctrl.tag = idm::get_unlocked<lv2_obj, lv2_int_tag>(ar.pop<u32>());
 		}
 
 		g_raw_spu_ctr++;
@@ -2058,8 +2175,8 @@ void spu_thread::save(utils::serial& ar)
 
 	if (raddr)
 	{
-		// Lose reservation at savestate load with an event if one existed at savestate save
-		set_events(SPU_EVENT_LR);
+		// Last check for reservation-lost event
+		get_events(SPU_EVENT_LR);
 	}
 
 	ar(index);
@@ -2072,6 +2189,9 @@ void spu_thread::save(utils::serial& ar)
 	ar(option, lv2_id, *spu_tname.load());
 
 	serialize_common(ar);
+
+	// Let's save it as u64 for future proofing
+	ar(u64{raddr});
 
 	if (get_type() == spu_type::threaded)
 	{
@@ -2298,7 +2418,7 @@ void spu_thread::do_dma_transfer(spu_thread* _this, const spu_mfc_cmd& args, u8*
 
 		if (!_this) [[unlikely]]
 		{
-			if (_cpu->id_type() == 2)
+			if (_cpu->get_class() == thread_class::spu)
 			{
 				// Use range_lock of current SPU thread for range locks
 				range_lock = static_cast<spu_thread*>(_cpu)->range_lock;
@@ -3464,7 +3584,7 @@ bool spu_thread::do_list_transfer(spu_mfc_cmd& args)
 			ch_stall_stat.set_value(utils::rol32(1, args.tag) | ch_stall_stat.get_value());
 
 			args.tag |= 0x80; // Set stalled status
-			args.eal = reinterpret_cast<const u8*>(item_ptr) - this->ls;
+			args.eal = ::narrow<u32>(reinterpret_cast<const u8*>(item_ptr) - this->ls);
 			args.lsa = arg_lsa;
 			args.size = arg_size;
 			return false;
@@ -3675,19 +3795,22 @@ bool spu_thread::do_putllc(const spu_mfc_cmd& args)
 		if (raddr)
 		{
 			// Last check for event before we clear the reservation
-			if (raddr == addr)
+			if (~ch_events.load().events & SPU_EVENT_LR)
 			{
-				set_events(SPU_EVENT_LR);
-			}
-			else
-			{
-				get_events(SPU_EVENT_LR);
+				if (raddr == addr)
+				{
+					set_events(SPU_EVENT_LR);
+				}
+				else
+				{
+					get_events(SPU_EVENT_LR);
+				}
 			}
 		}
 
 		if (!vm::check_addr(addr, vm::page_writable))
 		{
-			vm::_ref<atomic_t<u8>>(addr) += 0; // Access violate
+			utils::trigger_write_page_fault(vm::base(addr));
 		}
 
 		raddr = 0;
@@ -3789,7 +3912,7 @@ void do_cell_atomic_128_store(u32 addr, const void* to_write)
 		else if (!g_use_rtm)
 		{
 			// Provoke page fault
-			vm::_ref<atomic_t<u32>>(addr) += 0;
+			utils::trigger_write_page_fault(vm::base(addr));
 
 			// Hard lock
 			auto spu = cpu ? cpu->try_get<spu_thread>() : nullptr;
@@ -3797,7 +3920,7 @@ void do_cell_atomic_128_store(u32 addr, const void* to_write)
 			mov_rdata(sdata, *static_cast<const spu_rdata_t*>(to_write));
 			vm::reservation_acquire(addr) += 32;
 		}
-		else if (cpu->id_type() != 2)
+		else if (cpu->get_class() != thread_class::spu)
 		{
 			u64 stx, ftx;
 			result = spu_putlluc_tx(addr, to_write, &stx, &ftx);
@@ -4027,9 +4150,11 @@ bool spu_thread::check_mfc_interrupts(u32 next_pc)
 	return false;
 }
 
-bool spu_thread::is_exec_code(u32 addr, std::span<const u8> ls_ptr, u32 base_addr)
+bool spu_thread::is_exec_code(u32 addr, std::span<const u8> ls_ptr, u32 base_addr, bool avoid_dead_code)
 {
-	for (u32 i = 0; i < 30; i++)
+	bool had_conditional = false;
+
+	for (u32 i = 0; i < 40; i++)
 	{
 		if (addr & ~0x3FFFC)
 		{
@@ -4050,11 +4175,43 @@ bool spu_thread::is_exec_code(u32 addr, std::span<const u8> ls_ptr, u32 base_add
 			return false;
 		}
 
-		if (type == spu_itype::STOP && op.rb)
+		if (type == spu_itype::STOP)
 		{
-			return false;
+			if (op.rb)
+			{
+				return false;
+			}
+
+			if (avoid_dead_code)
+			{
+				switch (op.opcode)
+				{
+				case SYS_SPU_THREAD_STOP_YIELD:
+				case SYS_SPU_THREAD_STOP_GROUP_EXIT:
+				case SYS_SPU_THREAD_STOP_THREAD_EXIT:
+				case SYS_SPU_THREAD_STOP_RECEIVE_EVENT:
+				case SYS_SPU_THREAD_STOP_TRY_RECEIVE_EVENT:
+				case SYS_SPU_THREAD_STOP_SWITCH_SYSTEM_MODULE:
+				{
+					break;
+				}
+				default:
+				{
+					return false;
+				}
+				}
+			}
 		}
 
+		if (type == spu_itype::STOPD && !had_conditional)
+		{
+			return !avoid_dead_code;
+		}
+
+		if (i != 0 && type == spu_itype::STOPD)
+		{
+			return true;
+		}
 		if (type & spu_itype::branch)
 		{
 			if (type == spu_itype::BR && op.rt && op.rt != 127u)
@@ -4087,6 +4244,58 @@ bool spu_thread::is_exec_code(u32 addr, std::span<const u8> ls_ptr, u32 base_add
 					break;
 				}
 			}
+			else
+			{
+				switch (type)
+				{
+				case spu_itype::BR:
+				case spu_itype::BRNZ:
+				case spu_itype::BRZ:
+				case spu_itype::BRHNZ:
+				case spu_itype::BRHZ:
+				case spu_itype::BRSL:
+				{
+					const s32 rel = bf_t<s32, 0, 18>::extract(static_cast<s32>(u32{op.i16} << 2));
+
+					if (rel == 0 && !had_conditional && avoid_dead_code)
+					{
+						// Infinite loop 100%, detect that as invalid code
+						return false;
+					}
+
+					// Detect "invalid" relative branches
+					// Branch offsets that, although are the only way to get X code address using relative address
+					// Rely on overflow/underflow of SPU memory bounds
+					// Thus they would behave differently if SPU LS memory size was to increase (evolving the CELL architecture was the original plan) 
+					// Making them highly unlikely to be valid code
+
+					if (rel < 0)
+					{
+						if (addr < 0u - rel)
+						{
+							return false;
+						}
+					}
+					else if (SPU_LS_SIZE - addr <= rel + 0u)
+					{
+						return false;
+					}
+
+					if (type == spu_itype::BRSL)
+					{
+						// Insert a virtual return-to-next, because it is usually a call
+						results[1] = addr + 4;
+						std::swap(results[1], results[0]);
+					}
+
+					break;
+				}
+				default:
+				{
+					break;
+				}
+				}
+			}
 
 			for (usz res_i = 1; res_i < results.size(); res_i++)
 			{
@@ -4111,6 +4320,8 @@ bool spu_thread::is_exec_code(u32 addr, std::span<const u8> ls_ptr, u32 base_add
 				{
 					return false;
 				}
+
+				had_conditional = true;
 			}
 
 			addr = spu_branch_target(results[0]);
@@ -4219,7 +4430,7 @@ bool spu_thread::process_mfc_cmd()
 					// Need to check twice for it to be accurate, the code is before and not after this check for:
 					// 1. Reduce time between reservation accesses so TSX panelty would be lowered
 					// 2. Increase the chance of change detection: if GETLLAR has been called again new data is probably wanted
-					if (rtime == vm::reservation_acquire(addr) && (!g_cfg.core.spu_accurate_getllar || cmp_rdata(rdata, data)))
+					if (rtime == vm::reservation_acquire(addr) && cmp_rdata(rdata, data))
 					{
 						if ([&]() -> bool
 						{
@@ -4396,7 +4607,7 @@ bool spu_thread::process_mfc_cmd()
 				continue;
 			}
 
-			if (g_cfg.core.spu_accurate_getllar && !cmp_rdata(rdata, data))
+			if (!cmp_rdata(rdata, data))
 			{
 				i += 2;
 				continue;
@@ -4733,7 +4944,7 @@ std::pair<u32, u32> spu_thread::read_dec() const
 	return {static_cast<u32>(res), static_cast<u32>(res >> 32)};
 }
 
-spu_thread::ch_events_t spu_thread::get_events(u32 mask_hint, bool waiting, bool reading)
+spu_thread::ch_events_t spu_thread::get_events(u64 mask_hint, bool waiting, bool reading)
 {
 	if (auto mask1 = ch_events.load().mask; mask1 & ~SPU_EVENT_IMPLEMENTED)
 	{
@@ -5082,10 +5293,12 @@ s64 spu_thread::get_ch_value(u32 ch)
 			}
 		}
 
+		const usz seed = (utils::get_tsc() >> 8) % 100;
+
 #ifdef __linux__
 		const bool reservation_busy_waiting = false;
 #else
-		const bool reservation_busy_waiting = ((utils::get_tsc() >> 8) % 100 + ((raddr == spurs_addr) ? 50 : 0)) < g_cfg.core.spu_reservation_busy_waiting_percentage;
+		const bool reservation_busy_waiting = (seed + ((raddr == spurs_addr) ? 50u : 0u)) < g_cfg.core.spu_reservation_busy_waiting_percentage;
 #endif
 
 		for (; !events.count; events = get_events(mask1 & ~SPU_EVENT_LR, true, true))
@@ -5110,6 +5323,23 @@ s64 spu_thread::get_ch_value(u32 ch)
 				// Don't busy-wait with TSX - memory is sensitive
 				if (g_use_rtm || !reservation_busy_waiting)
 				{
+					if (u32 work_count = g_spu_work_count)
+					{
+						const u32 true_free = utils::sub_saturate<u32>(utils::get_thread_count(), 10);
+
+						if (work_count > true_free)
+						{
+							// SPU thread count estimation
+							const u32 thread_count = (group ? g_raw_spu_ctr + group->max_num : g_raw_spu_ctr + 3);
+
+							if (thread_count && seed % thread_count < work_count - true_free)
+							{
+								// Make the SPU wait longer for other threads to do the work
+								thread_ctrl::wait_for(200);
+								continue;
+							}
+						}
+					}
 #ifdef __linux__
 					vm::reservation_notifier(raddr).wait(rtime, atomic_wait_timeout{50'000});
 #else
@@ -5118,7 +5348,7 @@ s64 spu_thread::get_ch_value(u32 ch)
 						atomic_wait_engine::set_one_time_use_wait_callback(+[](u64) -> bool
 						{
 							const auto _this = static_cast<spu_thread*>(cpu_thread::get_current());
-							AUDIT(_this->id_type() == 1);
+							AUDIT(_this->get_class() == thread_class::spu);
 
 							return !_this->is_stopped();
 						});
@@ -5132,7 +5362,7 @@ s64 spu_thread::get_ch_value(u32 ch)
 					atomic_wait_engine::set_one_time_use_wait_callback(mask1 != SPU_EVENT_LR ? nullptr : +[](u64 attempts) -> bool
 					{
 						const auto _this = static_cast<spu_thread*>(cpu_thread::get_current());
-						AUDIT(_this->id_type() == 2);
+						AUDIT(_this->get_class() == thread_class::spu);
 
 						const auto old = +_this->state;
 
@@ -5964,6 +6194,12 @@ bool spu_thread::stop_and_signal(u32 code)
 		return true;
 	}
 
+	case SYS_SPU_THREAD_STOP_SWITCH_SYSTEM_MODULE:
+	{
+		fmt::throw_exception("SYS_SPU_THREAD_STOP_SWITCH_SYSTEM_MODULE (op=0x%x, Out_MBox=%s)", code, _ref<u32>(pc), ch_out_mbox);
+		return true;
+	}
+
 	case SYS_SPU_THREAD_STOP_YIELD:
 	{
 		// SPU thread group yield (TODO)
@@ -6176,7 +6412,7 @@ spu_exec_object spu_thread::capture_memory_as_elf(std::span<spu_memory_segment_d
 
 		if (auto [vm_addr, ok] = vm::try_get_addr(seg.src_addr); ok)
 		{
-			if (!vm::try_access(vm_addr, data.data(), data.size(), false))
+			if (!vm::try_access(vm_addr, data.data(), seg.segment_size, false))
 			{
 				spu_log.error("capture_memory_as_elf(): Failed to read {0x%x..0x%x}, aborting capture.", +vm_addr, vm_addr + seg.segment_size - 1);
 				spu_exec.set_error(elf_error::stream_data);
@@ -6382,7 +6618,7 @@ spu_thread::spu_prio_t spu_thread::priority_t::load() const
 	if (_this->get_type() != spu_type::threaded || !_this->group->has_scheduler_context)
 	{
 		spu_thread::spu_prio_t prio{};
-		prio.prio = smax;
+		prio.prio = s32{smax};
 		return prio;
 	}
 
@@ -6618,3 +6854,4 @@ void fmt_class_string<spu_channel_4_t>::format(std::string& out, u64 arg)
 
 DECLARE(spu_thread::g_raw_spu_ctr){};
 DECLARE(spu_thread::g_raw_spu_id){};
+DECLARE(spu_thread::g_spu_work_count){};

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
@@ -40,10 +40,12 @@
   <ItemDefinitionGroup>
     <ClCompile>
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <AdditionalIncludeDirectories>..\3rdparty\miniupnp\miniupnp\miniupnpc\include;..\3rdparty\wolfssl\wolfssl;..\3rdparty\flatbuffers\include;..\3rdparty\libusb\libusb\libusb;..\3rdparty\yaml-cpp\yaml-cpp\include;..\3rdparty\SoundTouch\soundtouch\include;..\3rdparty\rtmidi\rtmidi;..\3rdparty\zlib\zlib;..\3rdparty\llvm\llvm\include;..\3rdparty\llvm\llvm\llvm\include;..\3rdparty\llvm\llvm_build\include;$(VULKAN_SDK)\Include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\3rdparty\miniupnp\miniupnp\miniupnpc\include;..\3rdparty\wolfssl\wolfssl;..\3rdparty\flatbuffers\include;..\3rdparty\libusb\libusb\libusb;..\3rdparty\yaml-cpp\yaml-cpp\include;..\3rdparty\SoundTouch\soundtouch\include;..\3rdparty\rtmidi\rtmidi;..\3rdparty\zlib\zlib;..\3rdparty\llvm\llvm\include;..\3rdparty\llvm\llvm\llvm\include;..\3rdparty\llvm\llvm_build\include;$(VULKAN_SDK)\Include;..\3rdparty\zstd\zstd\lib</AdditionalIncludeDirectories>
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Release|x64'">MaxSpeed</Optimization>
-      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">MINIUPNP_STATICLIB;HAVE_VULKAN;HAVE_SDL2;ZLIB_CONST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">MINIUPNP_STATICLIB;HAVE_VULKAN;HAVE_SDL2;ZLIB_CONST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">AL_LIBTYPE_STATIC;MINIUPNP_STATICLIB;HAVE_VULKAN;HAVE_SDL2;ZLIB_CONST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">AL_LIBTYPE_STATIC;MINIUPNP_STATICLIB;HAVE_VULKAN;HAVE_SDL2;ZLIB_CONST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalModuleDependencies Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%(AdditionalModuleDependencies)</AdditionalModuleDependencies>
+      <AdditionalModuleDependencies Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(AdditionalModuleDependencies)</AdditionalModuleDependencies>
     </ClCompile>
     <PreBuildEvent>
       <Command>cmd.exe /c "$(SolutionDir)\Utilities\git-version-gen.cmd"</Command>
@@ -71,17 +73,23 @@
     <ClCompile Include="Emu\games_config.cpp" />
     <ClCompile Include="Emu\Io\camera_config.cpp" />
     <ClCompile Include="Emu\Io\midi_config_types.cpp" />
+    <ClCompile Include="Emu\Io\MouseHandler.cpp" />
     <ClCompile Include="Emu\Io\pad_types.cpp" />
+    <ClCompile Include="Emu\Io\rb3drums_config.cpp" />
+    <ClCompile Include="Emu\Io\RB3MidiDrums.cpp" />
     <ClCompile Include="Emu\Io\RB3MidiGuitar.cpp" />
     <ClCompile Include="Emu\Io\RB3MidiKeyboard.cpp" />
     <ClCompile Include="Emu\Io\recording_config.cpp" />
     <ClCompile Include="Emu\Io\Turntable.cpp" />
+    <ClCompile Include="Emu\Io\GameTablet.cpp" />
     <ClCompile Include="Emu\Io\GHLtar.cpp" />
+    <ClCompile Include="Emu\Io\GunCon3.cpp" />
     <ClCompile Include="Emu\Io\Buzz.cpp" />
     <ClCompile Include="Emu\Io\usio.cpp" />
     <ClCompile Include="Emu\Audio\AudioBackend.cpp" />
     <ClCompile Include="Emu\Io\interception.cpp" />
     <ClCompile Include="Emu\Io\KeyboardHandler.cpp" />
+    <ClCompile Include="Emu\Io\mouse_config.cpp" />
     <ClCompile Include="Emu\Io\pad_config.cpp" />
     <ClCompile Include="Emu\Io\pad_config_types.cpp" />
     <ClCompile Include="Emu\IPC_config.cpp" />
@@ -93,15 +101,26 @@
     <ClCompile Include="Emu\perf_monitor.cpp" />
     <ClCompile Include="Emu\RSX\Common\texture_cache.cpp" />
     <ClCompile Include="Emu\RSX\Core\RSXContext.cpp" />
+    <ClCompile Include="Emu\RSX\NV47\FW\draw_call.cpp" />
+    <ClCompile Include="Emu\RSX\NV47\FW\reg_context.cpp" />
+    <ClCompile Include="Emu\RSX\NV47\HW\common.cpp" />
+    <ClCompile Include="Emu\RSX\NV47\HW\nv0039.cpp" />
+    <ClCompile Include="Emu\RSX\NV47\HW\nv3089.cpp" />
+    <ClCompile Include="Emu\RSX\NV47\HW\nv308a.cpp" />
+    <ClCompile Include="Emu\RSX\NV47\HW\nv406e.cpp" />
+    <ClCompile Include="Emu\RSX\NV47\HW\nv4097.cpp" />
     <ClCompile Include="Emu\RSX\Overlays\HomeMenu\overlay_home_menu.cpp" />
     <ClCompile Include="Emu\RSX\Overlays\HomeMenu\overlay_home_menu_components.cpp" />
     <ClCompile Include="Emu\RSX\Overlays\HomeMenu\overlay_home_menu_message_box.cpp" />
     <ClCompile Include="Emu\RSX\Overlays\HomeMenu\overlay_home_menu_main_menu.cpp" />
     <ClCompile Include="Emu\RSX\Overlays\HomeMenu\overlay_home_menu_page.cpp" />
     <ClCompile Include="Emu\RSX\Overlays\HomeMenu\overlay_home_menu_settings.cpp" />
+    <ClCompile Include="Emu\RSX\Overlays\Network\overlay_recvmessage_dialog.cpp" />
+    <ClCompile Include="Emu\RSX\Overlays\Network\overlay_sendmessage_dialog.cpp" />
     <ClCompile Include="Emu\RSX\Overlays\overlay_animated_icon.cpp" />
     <ClCompile Include="Emu\RSX\Overlays\overlay_controls.cpp" />
     <ClCompile Include="Emu\RSX\Overlays\overlay_cursor.cpp" />
+    <ClCompile Include="Emu\RSX\Overlays\overlay_debug_overlay.cpp" />
     <ClCompile Include="Emu\RSX\Overlays\overlay_manager.cpp" />
     <ClCompile Include="Emu\RSX\Overlays\overlay_media_list_dialog.cpp" />
     <ClCompile Include="Emu\RSX\Overlays\overlay_osk_panel.cpp" />
@@ -112,6 +131,7 @@
     <ClCompile Include="Emu\RSX\Overlays\Shaders\shader_loading_dialog_native.cpp" />
     <ClCompile Include="Emu\RSX\Program\ProgramStateCache.cpp" />
     <ClCompile Include="Emu\RSX\Program\program_util.cpp" />
+    <ClCompile Include="Emu\RSX\Program\SPIRVCommon.cpp" />
     <ClCompile Include="Emu\RSX\RSXDisAsm.cpp" />
     <ClCompile Include="Emu\RSX\RSXZCULL.cpp" />
     <ClCompile Include="Emu\RSX\rsx_vertex_data.cpp" />
@@ -135,6 +155,9 @@
     <ClCompile Include="Emu\NP\rpcn_client.cpp" />
     <ClCompile Include="Emu\vfs_config.cpp" />
     <ClCompile Include="Loader\disc.cpp" />
+    <ClCompile Include="util\serialization_ext.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="util\atomic.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
@@ -153,7 +176,10 @@
     <ClCompile Include="util\dyn_lib.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="..\Utilities\JIT.cpp">
+    <ClCompile Include="..\Utilities\JITASM.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\Utilities\JITLLVM.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="util\logs.cpp">
@@ -454,7 +480,8 @@
     <ClCompile Include="Emu\Cell\MFC.cpp" />
     <ClCompile Include="Emu\Cell\PPUThread.cpp" />
     <ClCompile Include="Emu\Cell\RawSPUThread.cpp" />
-    <ClCompile Include="Emu\Cell\SPURecompiler.cpp" />
+    <ClCompile Include="Emu\Cell\SPUCommonRecompiler.cpp" />
+    <ClCompile Include="Emu\Cell\SPULLVMRecompiler.cpp" />
     <ClCompile Include="Emu\Cell\SPUThread.cpp" />
     <ClCompile Include="Emu\CPU\CPUThread.cpp" />
     <ClCompile Include="Emu\VFS.cpp" />
@@ -478,7 +505,7 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\3rdparty\stblib\include\stb_image.h" />
+    <ClInclude Include="..\3rdparty\stblib\stb\stb_image.h" />
     <ClInclude Include="..\Utilities\address_range.h" />
     <ClInclude Include="..\Utilities\cheat_info.h" />
     <ClInclude Include="..\Utilities\simple_ringbuf.h" />
@@ -514,19 +541,25 @@
     <ClInclude Include="Emu\Io\emulated_pad_config.h" />
     <ClInclude Include="Emu\Io\gem_config.h" />
     <ClInclude Include="Emu\Io\ghltar_config.h" />
+    <ClInclude Include="Emu\Io\guncon3_config.h" />
     <ClInclude Include="Emu\Io\midi_config_types.h" />
     <ClInclude Include="Emu\Io\music_handler_base.h" />
     <ClInclude Include="Emu\Io\Null\null_camera_handler.h" />
     <ClInclude Include="Emu\Io\Null\null_music_handler.h" />
+    <ClInclude Include="Emu\Io\rb3drums_config.h" />
+    <ClInclude Include="Emu\Io\RB3MidiDrums.h" />
     <ClInclude Include="Emu\Io\RB3MidiGuitar.h" />
     <ClInclude Include="Emu\Io\RB3MidiKeyboard.h" />
     <ClInclude Include="Emu\Io\recording_config.h" />
     <ClInclude Include="Emu\Io\Turntable.h" />
+    <ClInclude Include="Emu\Io\GameTablet.h" />
     <ClInclude Include="Emu\Io\GHLtar.h" />
+    <ClInclude Include="Emu\Io\GunCon3.h" />
     <ClInclude Include="Emu\Io\Buzz.h" />
     <ClInclude Include="Emu\Io\turntable_config.h" />
     <ClInclude Include="Emu\Io\usio.h" />
     <ClInclude Include="Emu\Io\interception.h" />
+    <ClInclude Include="Emu\Io\mouse_config.h" />
     <ClInclude Include="Emu\Io\pad_types.h" />
     <ClInclude Include="Emu\Io\Keyboard.h" />
     <ClInclude Include="Emu\Io\pad_config.h" />
@@ -569,14 +602,32 @@
     <ClInclude Include="Emu\RSX\Core\RSXDisplay.h" />
     <ClInclude Include="Emu\RSX\Core\RSXReservationLock.hpp" />
     <ClInclude Include="Emu\RSX\Core\RSXVertexTypes.h" />
+    <ClInclude Include="Emu\RSX\NV47\FW\draw_call.hpp" />
+    <ClInclude Include="Emu\RSX\NV47\FW\draw_call.inc.h" />
+    <ClInclude Include="Emu\RSX\NV47\FW\GRAPH_backend.h" />
+    <ClInclude Include="Emu\RSX\NV47\FW\reg_context.h" />
+    <ClInclude Include="Emu\RSX\NV47\HW\context.h" />
+    <ClInclude Include="Emu\RSX\NV47\HW\context_accessors.define.h" />
+    <ClInclude Include="Emu\RSX\NV47\HW\context_accessors.undef.h" />
+    <ClInclude Include="Emu\RSX\NV47\HW\nv0039.h" />
+    <ClInclude Include="Emu\RSX\NV47\HW\nv3089.h" />
+    <ClInclude Include="Emu\RSX\NV47\HW\nv308a.h" />
+    <ClInclude Include="Emu\RSX\NV47\HW\nv406e.h" />
+    <ClInclude Include="Emu\RSX\NV47\HW\nv4097.h" />
+    <ClInclude Include="Emu\RSX\NV47\HW\nv47.h" />
+    <ClInclude Include="Emu\RSX\NV47\HW\common.h" />
+    <ClInclude Include="Emu\RSX\NV47\HW\nv47_sync.hpp" />
     <ClInclude Include="Emu\RSX\Overlays\HomeMenu\overlay_home_menu.h" />
     <ClInclude Include="Emu\RSX\Overlays\HomeMenu\overlay_home_menu_components.h" />
     <ClInclude Include="Emu\RSX\Overlays\HomeMenu\overlay_home_menu_message_box.h" />
     <ClInclude Include="Emu\RSX\Overlays\HomeMenu\overlay_home_menu_main_menu.h" />
     <ClInclude Include="Emu\RSX\Overlays\HomeMenu\overlay_home_menu_page.h" />
     <ClInclude Include="Emu\RSX\Overlays\HomeMenu\overlay_home_menu_settings.h" />
+    <ClInclude Include="Emu\RSX\Overlays\Network\overlay_recvmessage_dialog.h" />
+    <ClInclude Include="Emu\RSX\Overlays\Network\overlay_sendmessage_dialog.h" />
     <ClInclude Include="Emu\RSX\Overlays\overlay_animated_icon.h" />
     <ClInclude Include="Emu\RSX\Overlays\overlay_cursor.h" />
+    <ClInclude Include="Emu\RSX\Overlays\overlay_debug_overlay.h" />
     <ClInclude Include="Emu\RSX\Overlays\overlay_edit_text.hpp" />
     <ClInclude Include="Emu\RSX\Overlays\overlay_list_view.hpp" />
     <ClInclude Include="Emu\RSX\Overlays\overlay_loading_icon.hpp" />
@@ -605,6 +656,7 @@
     <ClInclude Include="Emu\RSX\Overlays\overlay_utils.h" />
     <ClInclude Include="Emu\RSX\Overlays\Shaders\shader_loading_dialog.h" />
     <ClInclude Include="Emu\RSX\Overlays\Shaders\shader_loading_dialog_native.h" />
+    <ClInclude Include="Emu\RSX\Program\SPIRVCommon.h" />
     <ClInclude Include="Emu\RSX\RSXDisAsm.h" />
     <ClInclude Include="Emu\RSX\RSXZCULL.h" />
     <ClInclude Include="Emu\savestate_utils.hpp" />
@@ -618,10 +670,11 @@
     <ClInclude Include="Loader\mself.hpp" />
     <ClInclude Include="util\atomic.hpp" />
     <ClInclude Include="util\bless.hpp" />
-    <ClInclude Include="util\image_sink.h" />
+    <ClInclude Include="util\video_sink.h" />
     <ClInclude Include="util\video_provider.h" />
     <ClInclude Include="util\media_utils.h" />
     <ClInclude Include="util\serialization.hpp" />
+    <ClInclude Include="util\serialization_ext.hpp" />
     <ClInclude Include="util\v128.hpp" />
     <ClInclude Include="util\simd.hpp" />
     <ClInclude Include="util\to_endian.hpp" />
@@ -828,7 +881,6 @@
     <ClInclude Include="Emu\RSX\Capture\rsx_trace.h" />
     <ClInclude Include="Emu\RSX\Program\GLSLCommon.h" />
     <ClInclude Include="Emu\RSX\Common\surface_utils.h" />
-    <ClInclude Include="Emu\RSX\Common\TextGlyphs.h" />
     <ClInclude Include="Emu\RSX\Common\texture_cache.h" />
     <ClInclude Include="Emu\RSX\Common\texture_cache_checker.h" />
     <ClInclude Include="Emu\RSX\Common\texture_cache_predictor.h" />
@@ -899,6 +951,12 @@
     <ProjectReference Include="..\3rdparty\yaml-cpp\yaml-cpp.vcxproj">
       <Project>{fdc361c5-7734-493b-8cfb-037308b35122}</Project>
     </ProjectReference>
+    <ProjectReference Include="..\3rdparty\zlib\zlib.vcxproj">
+      <Project>{60f89955-91c6-3a36-8000-13c592fec2df}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\3rdparty\zstd\zstd.vcxproj">
+      <Project>{4e52a41a-f33b-4c7a-8c36-a1a6b4f4277c}</Project>
+    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <None Include="Emu\RSX\Program\GLSLInterpreter\FragmentInterpreter.glsl" />
@@ -919,9 +977,16 @@
     <None Include="Emu\RSX\Program\GLSLSnippets\RSXProg\RSXFragmentTextureMSAAOpsInternal.glsl" />
     <None Include="Emu\RSX\Program\GLSLSnippets\RSXProg\RSXFragmentTextureOps.glsl" />
     <None Include="Emu\RSX\Program\GLSLSnippets\RSXProg\RSXProgramCommon.glsl" />
+    <None Include="Emu\RSX\Program\GLSLSnippets\RSXProg\RSXProgrammableBlendPrologue.glsl" />
+    <None Include="Emu\RSX\Program\GLSLSnippets\RSXProg\RSXROPEpilogue.glsl" />
+    <None Include="Emu\RSX\Program\GLSLSnippets\RSXProg\RSXROPPrologue.glsl" />
     <None Include="Emu\RSX\Program\GLSLSnippets\RSXProg\RSXVertexFetch.glsl" />
     <None Include="Emu\RSX\Program\GLSLSnippets\RSXProg\RSXVertexPrologue.glsl" />
     <None Include="Emu\RSX\Program\GLSLSnippets\ShuffleBytes.glsl" />
+    <None Include="Emu\RSX\Program\GLSLSnippets\VideoOutCalibrationPass.glsl" />
+    <None Include="Emu\RSX\Program\Upscalers\FSR1\fsr_ffx_a_flattened.inc" />
+    <None Include="Emu\RSX\Program\Upscalers\FSR1\fsr_ffx_fsr1_flattened.inc" />
+    <None Include="Emu\RSX\Program\Upscalers\FSR1\fsr_ubershader.glsl" />
   </ItemGroup>
   <PropertyGroup Label="UserMacros" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

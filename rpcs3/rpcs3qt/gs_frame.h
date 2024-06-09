@@ -5,7 +5,6 @@
 #include "util/types.hpp"
 #include "util/atomic.hpp"
 #include "util/media_utils.h"
-#include "util/video_provider.h"
 #include "Emu/RSX/GSFrameBase.h"
 
 #include <QWindow>
@@ -90,7 +89,6 @@ protected:
 	void flip(draw_context_t context, bool skip_frame = false) override;
 	int client_width() override;
 	int client_height() override;
-	double client_device_pixel_ratio() const override;
 
 	bool event(QEvent* ev) override;
 

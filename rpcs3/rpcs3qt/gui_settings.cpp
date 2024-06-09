@@ -16,6 +16,7 @@ LOG_CHANNEL(cfg_log, "CFG");
 namespace gui
 {
 	QString stylesheet;
+	bool custom_stylesheet_active = false;
 
 	QString get_game_list_column_name(game_list_columns col)
 	{
@@ -95,6 +96,8 @@ namespace gui
 			return "trophy_game_column_name";
 		case trophy_game_list_columns::progress:
 			return "trophy_game_column_progress";
+		case trophy_game_list_columns::trophies:
+			return "trophy_game_column_trophies";
 		case trophy_game_list_columns::count:
 			return "";
 		}

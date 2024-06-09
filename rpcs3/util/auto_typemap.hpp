@@ -44,6 +44,7 @@ namespace stx
 			static void call_dtor(void* ptr) noexcept
 			{
 				std::launder(static_cast<T*>(ptr))->~T();
+				std::memset(ptr, 0xCC, sizeof(T)); // Set to trap values
 			}
 
 			template <typename T>
@@ -93,8 +94,10 @@ namespace stx
 			{
 				ensure(Size >= stx::typelist<typeinfo>().size());
 				ensure(Align >= stx::typelist<typeinfo>().align());
-				m_data[0] = 0;
 			}
+
+			// Set to trap values
+			std::memset(Size == 0 ? m_list : m_data, 0xCC, stx::typelist<typeinfo>().size());
 
 			for (const auto& type : stx::typelist<typeinfo>())
 			{
@@ -132,7 +135,12 @@ namespace stx
 			// Destroy objects in reverse order
 			for (; _max; _max--)
 			{
-				(*--m_info)->destroy(*--m_order);
+				auto* info = *--m_info;
+				const u32 type_index = static_cast<const type_info<typeinfo>*>(info)->index();
+				info->destroy(*--m_order);
+
+				// Set init to false. We don't want other fxo to use this fxo in their destructor.
+				m_init[type_index] = false;
 			}
 
 			// Pointers should be restored to their positions

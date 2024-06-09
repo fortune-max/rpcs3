@@ -35,32 +35,6 @@ void fmt_class_string<CellMouseError>::format(std::string& out, u64 arg)
 	});
 }
 
-MouseHandlerBase::MouseHandlerBase(utils::serial* ar)
-{
-	if (!ar)
-	{
-		return;
-	}
-
-	(*ar)(m_info.max_connect);
-
-	if (m_info.max_connect)
-	{
-		Emu.DeferDeserialization([this]()
-		{
-			Init(m_info.max_connect);
-			auto lk = init.init();
-		});
-	}
-}
-
-void MouseHandlerBase::save(utils::serial& ar)
-{
-	const auto inited = init.access();
-
-	ar(inited ? m_info.max_connect : 0);
-}
-
 error_code cellMouseInit(ppu_thread& ppu, u32 max_connect)
 {
 	sys_io.notice("cellMouseInit(max_connect=%d)", max_connect);
@@ -259,7 +233,7 @@ error_code cellMouseGetData(u32 port_no, vm::ptr<CellMouseData> data)
 
 error_code cellMouseGetDataList(u32 port_no, vm::ptr<CellMouseDataList> data)
 {
-	sys_io.notice("cellMouseGetDataList(port_no=%d, data=0x%x)", port_no, data);
+	sys_io.trace("cellMouseGetDataList(port_no=%d, data=0x%x)", port_no, data);
 
 	auto& handler = g_fxo->get<MouseHandlerBase>();
 
@@ -406,7 +380,7 @@ error_code cellMouseGetTabletDataList(u32 port_no, vm::ptr<CellMouseTabletDataLi
 
 error_code cellMouseGetRawData(u32 port_no, vm::ptr<CellMouseRawData> data)
 {
-	sys_io.notice("cellMouseGetRawData(port_no=%d, data=*0x%x)", port_no, data);
+	sys_io.trace("cellMouseGetRawData(port_no=%d, data=*0x%x)", port_no, data);
 
 	auto& handler = g_fxo->get<MouseHandlerBase>();
 

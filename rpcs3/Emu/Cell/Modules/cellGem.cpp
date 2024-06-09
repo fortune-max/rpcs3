@@ -22,6 +22,11 @@
 
 LOG_CHANNEL(cellGem);
 
+static inline constexpr u32 rgba(u8 r, u8 g, u8 b, u8 a)
+{
+	return ((r & 0xffu) << 24) | ((g & 0xffu) << 16) | ((b & 0xffu) << 8) | (a & 0xffu);
+}
+
 template <>
 void fmt_class_string<gem_btn>::format(std::string& out, u64 arg)
 {
@@ -112,6 +117,20 @@ void fmt_class_string<CellGemVideoConvertFormatEnum>::format(std::string& out, u
 
 		return unknown;
 	});
+}
+
+// last 4 out of 7 ports (7,6,5,4). index starts at 1
+static u32 port_num(u32 gem_num)
+{
+	ensure(gem_num < CELL_GEM_MAX_NUM);
+	return CELL_PAD_MAX_PORT_NUM - gem_num;
+}
+
+// last 4 out of 7 ports (6,5,4,3). index starts at 0
+static u32 pad_num(u32 gem_num)
+{
+	ensure(gem_num < CELL_GEM_MAX_NUM);
+	return (CELL_PAD_MAX_PORT_NUM - 1) - gem_num;
 }
 
 // **********************
@@ -278,12 +297,45 @@ public:
 			return;
 		}
 
+		bool is_connected = false;
+
 		switch (g_cfg.io.move)
 		{
 		case move_handler::fake:
-		case move_handler::mouse:
 		{
-			connected_controllers = 1;
+			connected_controllers = 0;
+			std::lock_guard lock(pad::g_pad_mutex);
+			const auto handler = pad::get_current_handler();
+			for (u32 i = 0; i < std::min<u32>(attribute.max_connect, CELL_GEM_MAX_NUM); i++)
+			{
+				const auto& pad = ::at32(handler->GetPads(), pad_num(i));
+				if (pad && (pad->m_port_status & CELL_PAD_STATUS_CONNECTED))
+				{
+					connected_controllers++;
+
+					if (gem_num == i)
+					{
+						is_connected = true;
+					}
+				}
+			}
+			break;
+		}
+		case move_handler::mouse:
+		case move_handler::raw_mouse:
+		{
+			auto& handler = g_fxo->get<MouseHandlerBase>();
+			std::lock_guard mouse_lock(handler.mutex);
+
+			// Make sure that the mouse handler is initialized
+			handler.Init(std::min<u32>(attribute.max_connect, CELL_GEM_MAX_NUM));
+
+			const MouseInfo& info = handler.GetInfo();
+			connected_controllers = std::min<u32>({ info.now_connect, attribute.max_connect, CELL_GEM_MAX_NUM });
+			if (gem_num < connected_controllers)
+			{
+				is_connected = true;
+			}
 			break;
 		}
 #ifdef HAVE_LIBEVDEV
@@ -291,8 +343,13 @@ public:
 		{
 			gun_thread& gun = g_fxo->get<gun_thread>();
 			std::scoped_lock lock(gun.handler.mutex);
-			connected_controllers = gun.handler.init() ? gun.handler.get_num_guns() : 0;
-			gun.num_devices = connected_controllers;
+			gun.num_devices = gun.handler.init() ? gun.handler.get_num_guns() : 0;
+			connected_controllers = std::min<u32>(std::min<u32>(attribute.max_connect, CELL_GEM_MAX_NUM), gun.num_devices);
+
+			if (gem_num < connected_controllers)
+			{
+				is_connected = true;
+			}
 			break;
 		}
 #endif
@@ -306,10 +363,10 @@ public:
 		controller.sphere_rgb = gem_color::get_default_color(gem_num);
 
 		// Assign status and port number
-		if (gem_num < connected_controllers)
+		if (is_connected)
 		{
 			controller.status = CELL_GEM_STATUS_READY;
-			controller.port = CELL_PAD_MAX_PORT_NUM - gem_num;
+			controller.port = port_num(gem_num);
 		}
 	}
 
@@ -442,42 +499,39 @@ void gem_config_data::operator()()
 			{
 				constexpr u32 in_pitch = 640;
 				constexpr u32 out_pitch = 640 * 4;
+				u8* dst = vc_attribute.video_data_out.get_ptr();
 
 				for (u32 y = 0; y < 480 - 1; y += 2)
 				{
+					const u8* src = &video_data_in[y * in_pitch];
+					const u16* src0 = reinterpret_cast<const u16*>(src);
+					const u16* src1 = reinterpret_cast<const u16*>(src + in_pitch);
+
+					u8* dst_row = dst + y * out_pitch;
+					u32* dst0 = reinterpret_cast<u32*>(dst_row);
+					u32* dst1 = reinterpret_cast<u32*>(dst_row + out_pitch);
+
 					for (u32 x = 0; x < 640 - 1; x += 2)
 					{
-						const u32 in_offset  = 1 * (y * 640 + x);
-						const u32 out_offset = 4 * (y * 640 + x);
+						const u16 top = *src0++;
+						const u16 bottom = *src1++;
 
-						const u8 b  = video_data_in[in_offset + 0];
-						const u8 g0 = video_data_in[in_offset + 1];
-						const u8 g1 = video_data_in[in_offset + in_pitch + 0];
-						const u8 r  = video_data_in[in_offset + in_pitch + 1];
+						const u8 b  = (top & 0xFF);
+						const u8 g0 = ((top >> 8) & 0xFF);
+						const u8 g1 = (bottom & 0xFF);
+						const u8 r  = ((bottom >> 8) & 0xFF);
 
 						// Top-Left
-						vc_attribute.video_data_out[out_offset + 0] = r;   // R
-						vc_attribute.video_data_out[out_offset + 1] = g0;  // G
-						vc_attribute.video_data_out[out_offset + 2] = b;   // B
-						vc_attribute.video_data_out[out_offset + 3] = 255; // A
+						*dst0++ = rgba(r, g0, b, 255);
 
 						// Top-Right Pixel
-						vc_attribute.video_data_out[out_offset + 4] = r;   // R
-						vc_attribute.video_data_out[out_offset + 5] = g0;  // G
-						vc_attribute.video_data_out[out_offset + 6] = b;   // B
-						vc_attribute.video_data_out[out_offset + 7] = 255; // A
+						*dst0++ = rgba(r, g0, b, 255);
 
 						// Bottom-Left Pixel
-						vc_attribute.video_data_out[out_offset + out_pitch + 0] = r;   // R
-						vc_attribute.video_data_out[out_offset + out_pitch + 1] = g1;  // G
-						vc_attribute.video_data_out[out_offset + out_pitch + 2] = b;   // B
-						vc_attribute.video_data_out[out_offset + out_pitch + 3] = 255;  // A
+						*dst1++ = rgba(r, g1, b, 255);
 
 						// Bottom-Right Pixel
-						vc_attribute.video_data_out[out_offset + out_pitch + 4] = r;   // R
-						vc_attribute.video_data_out[out_offset + out_pitch + 5] = g1;  // G
-						vc_attribute.video_data_out[out_offset + out_pitch + 6] = b;   // B
-						vc_attribute.video_data_out[out_offset + out_pitch + 7] = 255; // A
+						*dst1++ = rgba(r, g1, b, 255);
 					}
 				}
 			}
@@ -541,8 +595,8 @@ static bool check_gem_num(const u32 gem_num)
 
 static inline void draw_overlay_cursor(u32 gem_num, const gem_config::gem_controller&, s32 x_pos, s32 y_pos, s32 x_max, s32 y_max)
 {
-	const u16 x = static_cast<u16>(x_pos / (x_max / static_cast<f32>(rsx::overlays::overlay::virtual_width)));
-	const u16 y = static_cast<u16>(y_pos / (y_max / static_cast<f32>(rsx::overlays::overlay::virtual_height)));
+	const s16 x = static_cast<s16>(x_pos / (x_max / static_cast<f32>(rsx::overlays::overlay::virtual_width)));
+	const s16 y = static_cast<s16>(y_pos / (y_max / static_cast<f32>(rsx::overlays::overlay::virtual_height)));
 
 	// Note: We shouldn't use sphere_rgb here. The game will set it to black in many cases.
 	const gem_config_data::gem_color& rgb = gem_config_data::gem_color::get_default_color(gem_num);
@@ -638,12 +692,12 @@ extern bool is_input_allowed();
 /**
  * \brief Maps Move controller data (digital buttons, and analog Trigger data) to DS3 pad input.
  *        Unavoidably buttons conflict with DS3 mappings, which is problematic for some games.
- * \param port_no DS3 port number to use
+ * \param gem_num gem index to use
  * \param digital_buttons Bitmask filled with CELL_GEM_CTRL_* values
  * \param analog_t Analog value of Move's Trigger. Currently mapped to R2.
- * \return true on success, false if port_no controller is invalid
+ * \return true on success, false if controller is disconnected
  */
-static void ds3_input_to_pad(const u32 port_no, be_t<u16>& digital_buttons, be_t<u16>& analog_t)
+static void ds3_input_to_pad(const u32 gem_num, be_t<u16>& digital_buttons, be_t<u16>& analog_t)
 {
 	digital_buttons = 0;
 	analog_t = 0;
@@ -656,14 +710,14 @@ static void ds3_input_to_pad(const u32 port_no, be_t<u16>& digital_buttons, be_t
 	std::lock_guard lock(pad::g_pad_mutex);
 
 	const auto handler = pad::get_current_handler();
-	const auto& pad = ::at32(handler->GetPads(), port_no);
+	const auto& pad = ::at32(handler->GetPads(), pad_num(gem_num));
 
 	if (!(pad->m_port_status & CELL_PAD_STATUS_CONNECTED))
 	{
 		return;
 	}
 
-	const auto& cfg = ::at32(g_cfg_gem.players, port_no);
+	const auto& cfg = ::at32(g_cfg_gem.players, gem_num);
 	cfg->handle_input(pad, true, [&](gem_btn btn, u16 value, bool pressed)
 		{
 			if (!pressed)
@@ -707,12 +761,12 @@ static void ds3_input_to_pad(const u32 port_no, be_t<u16>& digital_buttons, be_t
 constexpr u16 ds3_max_x = 255;
 constexpr u16 ds3_max_y = 255;
 
-static inline void ds3_get_stick_values(u32 port_no, const std::shared_ptr<Pad>& pad, s32& x_pos, s32& y_pos)
+static inline void ds3_get_stick_values(u32 gem_num, const std::shared_ptr<Pad>& pad, s32& x_pos, s32& y_pos)
 {
 	x_pos = 0;
 	y_pos = 0;
 
-	const auto& cfg = ::at32(g_cfg_gem.players, port_no);
+	const auto& cfg = ::at32(g_cfg_gem.players, gem_num);
 	cfg->handle_input(pad, true, [&](gem_btn btn, u16 value, bool pressed)
 		{
 			if (!pressed)
@@ -733,7 +787,7 @@ static inline void ds3_get_stick_values(u32 port_no, const std::shared_ptr<Pad>&
 }
 
 template <typename T>
-static void ds3_pos_to_gem_state(const u32 port_no, const gem_config::gem_controller& controller, T& gem_state)
+static void ds3_pos_to_gem_state(u32 gem_num, const gem_config::gem_controller& controller, T& gem_state)
 {
 	if (!gem_state || !is_input_allowed())
 	{
@@ -743,7 +797,7 @@ static void ds3_pos_to_gem_state(const u32 port_no, const gem_config::gem_contro
 	std::lock_guard lock(pad::g_pad_mutex);
 
 	const auto handler = pad::get_current_handler();
-	const auto& pad = ::at32(handler->GetPads(), port_no);
+	const auto& pad = ::at32(handler->GetPads(), pad_num(gem_num));
 
 	if (!(pad->m_port_status & CELL_PAD_STATUS_CONNECTED))
 	{
@@ -751,15 +805,15 @@ static void ds3_pos_to_gem_state(const u32 port_no, const gem_config::gem_contro
 	}
 
 	s32 ds3_pos_x, ds3_pos_y;
-	ds3_get_stick_values(port_no, pad, ds3_pos_x, ds3_pos_y);
+	ds3_get_stick_values(gem_num, pad, ds3_pos_x, ds3_pos_y);
 
-	if constexpr (std::is_same<T, vm::ptr<CellGemState>>::value)
+	if constexpr (std::is_same_v<T, vm::ptr<CellGemState>>)
 	{
-		pos_to_gem_state(port_no, controller, gem_state, ds3_pos_x, ds3_pos_y, ds3_max_x, ds3_max_y);
+		pos_to_gem_state(gem_num, controller, gem_state, ds3_pos_x, ds3_pos_y, ds3_max_x, ds3_max_y);
 	}
-	else if constexpr (std::is_same<T, vm::ptr<CellGemImageState>>::value)
+	else if constexpr (std::is_same_v<T, vm::ptr<CellGemImageState>>)
 	{
-		pos_to_gem_image_state(port_no, controller, gem_state, ds3_pos_x, ds3_pos_y, ds3_max_x, ds3_max_y);
+		pos_to_gem_image_state(gem_num, controller, gem_state, ds3_pos_x, ds3_pos_y, ds3_max_x, ds3_max_y);
 	}
 }
 
@@ -767,11 +821,11 @@ static void ds3_pos_to_gem_state(const u32 port_no, const gem_config::gem_contro
  * \brief Maps external Move controller data to DS3 input. (This can be input from any physical pad, not just the DS3)
  *        Implementation detail: CellGemExtPortData's digital/analog fields map the same way as
  *        libPad, so no translation is needed.
- * \param port_no DS3 port number to use
+ * \param gem_num gem index to use
  * \param ext External data to modify
- * \return true on success, false if port_no controller is invalid
+ * \return true on success, false if controller is disconnected
  */
-static void ds3_input_to_ext(const u32 port_no, const gem_config::gem_controller& controller, CellGemExtPortData& ext)
+static void ds3_input_to_ext(const u32 gem_num, const gem_config::gem_controller& controller, CellGemExtPortData& ext)
 {
 	ext = {};
 
@@ -783,7 +837,7 @@ static void ds3_input_to_ext(const u32 port_no, const gem_config::gem_controller
 	std::lock_guard lock(pad::g_pad_mutex);
 
 	const auto handler = pad::get_current_handler();
-	const auto& pad = ::at32(handler->GetPads(), port_no);
+	const auto& pad = ::at32(handler->GetPads(), pad_num(gem_num));
 
 	if (!(pad->m_port_status & CELL_PAD_STATUS_CONNECTED))
 	{
@@ -811,8 +865,6 @@ static void ds3_input_to_ext(const u32 port_no, const gem_config::gem_controller
 
 /**
  * \brief Maps Move controller data (digital buttons, and analog Trigger data) to mouse input.
- *        Move Button: Mouse1
- *        Trigger:     Mouse2
  * \param mouse_no Mouse index number to use
  * \param digital_buttons Bitmask filled with CELL_GEM_CTRL_* values
  * \param analog_t Analog value of Move's Trigger.
@@ -840,7 +892,7 @@ static bool mouse_input_to_pad(const u32 mouse_no, be_t<u16>& digital_buttons, b
 		return false;
 	}
 
-	const auto& mouse_data = ::at32(handler.GetMice(), mouse_no);
+	const Mouse& mouse_data = ::at32(handler.GetMice(), mouse_no);
 	const auto is_pressed = [&mouse_data](MouseButtonCodes button) -> bool { return !!(mouse_data.buttons & button); };
 
 	digital_buttons = 0;
@@ -896,11 +948,11 @@ static void mouse_pos_to_gem_state(const u32 mouse_no, const gem_config::gem_con
 
 	const auto& mouse = ::at32(handler.GetMice(), mouse_no);
 
-	if constexpr (std::is_same<T, vm::ptr<CellGemState>>::value)
+	if constexpr (std::is_same_v<T, vm::ptr<CellGemState>>)
 	{
 		pos_to_gem_state(mouse_no, controller, gem_state, mouse.x_pos, mouse.y_pos, mouse.x_max, mouse.y_max);
 	}
-	else if constexpr (std::is_same<T, vm::ptr<CellGemImageState>>::value)
+	else if constexpr (std::is_same_v<T, vm::ptr<CellGemImageState>>)
 	{
 		pos_to_gem_image_state(mouse_no, controller, gem_state, mouse.x_pos, mouse.y_pos, mouse.x_max, mouse.y_max);
 	}
@@ -964,11 +1016,11 @@ static void gun_pos_to_gem_state(const u32 gem_no, const gem_config::gem_control
 		y_max = gun.handler.get_axis_y_max(gem_no);
 	}
 
-	if constexpr (std::is_same<T, vm::ptr<CellGemState>>::value)
+	if constexpr (std::is_same_v<T, vm::ptr<CellGemState>>)
 	{
 		pos_to_gem_state(gem_no, controller, gem_state, x_pos, y_pos, x_max, y_max);
 	}
-	else if constexpr (std::is_same<T, vm::ptr<CellGemImageState>>::value)
+	else if constexpr (std::is_same_v<T, vm::ptr<CellGemImageState>>)
 	{
 		pos_to_gem_image_state(gem_no, controller, gem_state, x_pos, y_pos, x_max, y_max);
 	}
@@ -1372,6 +1424,7 @@ error_code cellGemGetImageState(u32 gem_num, vm::ptr<CellGemImageState> gem_imag
 			ds3_pos_to_gem_state(gem_num, gem.controllers[gem_num], gem_image_state);
 			break;
 		case move_handler::mouse:
+		case move_handler::raw_mouse:
 			mouse_pos_to_gem_state(gem_num, gem.controllers[gem_num], gem_image_state);
 			break;
 #ifdef HAVE_LIBEVDEV
@@ -1426,6 +1479,7 @@ error_code cellGemGetInertialState(u32 gem_num, u32 state_flag, u64 timestamp, v
 			ds3_input_to_pad(gem_num, inertial_state->pad.digitalbuttons, inertial_state->pad.analog_T);
 			break;
 		case move_handler::mouse:
+		case move_handler::raw_mouse:
 			mouse_input_to_pad(gem_num, inertial_state->pad.digitalbuttons, inertial_state->pad.analog_T);
 			break;
 #ifdef HAVE_LIBEVDEV
@@ -1443,7 +1497,7 @@ error_code cellGemGetInertialState(u32 gem_num, u32 state_flag, u64 timestamp, v
 
 error_code cellGemGetInfo(vm::ptr<CellGemInfo> info)
 {
-	cellGem.warning("cellGemGetInfo(info=*0x%x)", info);
+	cellGem.trace("cellGemGetInfo(info=*0x%x)", info);
 
 	auto& gem = g_fxo->get<gem_config>();
 
@@ -1460,6 +1514,68 @@ error_code cellGemGetInfo(vm::ptr<CellGemInfo> info)
 	}
 
 	// TODO: Support connecting PlayStation Move controllers
+
+	switch (g_cfg.io.move)
+	{
+	case move_handler::fake:
+	{
+		gem.connected_controllers = 0;
+
+		std::lock_guard lock(pad::g_pad_mutex);
+		const auto handler = pad::get_current_handler();
+
+		for (u32 i = 0; i < CELL_GEM_MAX_NUM; i++)
+		{
+			const auto& pad = ::at32(handler->GetPads(), pad_num(i));
+			const bool connected = (pad && (pad->m_port_status & CELL_PAD_STATUS_CONNECTED) && i < gem.attribute.max_connect);
+
+			if (connected)
+			{
+				gem.connected_controllers++;
+				gem.controllers[i].status = CELL_GEM_STATUS_READY;
+				gem.controllers[i].port = port_num(i);
+			}
+			else
+			{
+				gem.controllers[i].status = CELL_GEM_STATUS_DISCONNECTED;
+				gem.controllers[i].port = 0;
+			}
+		}
+		break;
+	}
+	case move_handler::raw_mouse:
+	{
+		gem.connected_controllers = 0;
+
+		auto& handler = g_fxo->get<MouseHandlerBase>();
+		std::lock_guard mouse_lock(handler.mutex);
+
+		const MouseInfo& info = handler.GetInfo();
+
+		for (u32 i = 0; i < CELL_GEM_MAX_NUM; i++)
+		{
+			const bool connected = i < gem.attribute.max_connect && info.status[i] == CELL_MOUSE_STATUS_CONNECTED;
+
+			if (connected)
+			{
+				gem.connected_controllers++;
+				gem.controllers[i].status = CELL_GEM_STATUS_READY;
+				gem.controllers[i].port = port_num(i);
+			}
+			else
+			{
+				gem.controllers[i].status = CELL_GEM_STATUS_DISCONNECTED;
+				gem.controllers[i].port = 0;
+			}
+		}
+		break;
+	}
+	default:
+	{
+		break;
+	}
+	}
+
 	info->max_connect = gem.attribute.max_connect;
 	info->now_connect = gem.connected_controllers;
 
@@ -1558,7 +1674,7 @@ error_code cellGemGetState(u32 gem_num, u32 flag, u64 time_parameter, vm::ptr<Ce
 
 	if (!gem.is_controller_ready(gem_num))
 	{
-		return CELL_GEM_NOT_CONNECTED;
+		return not_an_error(CELL_GEM_NOT_CONNECTED);
 	}
 
 	// TODO: Get the gem state at the specified time
@@ -1603,6 +1719,7 @@ error_code cellGemGetState(u32 gem_num, u32 flag, u64 time_parameter, vm::ptr<Ce
 			ds3_pos_to_gem_state(gem_num, gem.controllers[gem_num], gem_state);
 			break;
 		case move_handler::mouse:
+		case move_handler::raw_mouse:
 			mouse_input_to_pad(gem_num, gem_state->pad.digitalbuttons, gem_state->pad.analog_T);
 			mouse_pos_to_gem_state(gem_num, gem.controllers[gem_num], gem_state);
 			break;

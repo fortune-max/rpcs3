@@ -11,7 +11,12 @@ public:
 	~progress_dialog();
 	void SetRange(int min, int max);
 	void SetValue(int progress);
+	void SetDeleteOnClose();
 	void SignalFailure() const;
+
+	void show_progress_indicator();
+
+	void setVisible(bool visible) override;
 
 private:
 	std::unique_ptr<progress_indicator> m_progress_indicator;

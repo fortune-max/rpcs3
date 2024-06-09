@@ -11,6 +11,7 @@
 #include <QSpinBox>
 #include <QTimer>
 #include <QScreen>
+#include <QStyleFactory>
 
 #include "gui_settings.h"
 #include "display_sleep_control.h"
@@ -92,7 +93,7 @@ void remove_item(QComboBox* box, int data_value, int def_value)
 
 extern const std::map<std::string_view, int> g_prx_list;
 
-settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std::shared_ptr<emu_settings> emu_settings, const int& tab_index, QWidget *parent, const GameInfo* game)
+settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std::shared_ptr<emu_settings> emu_settings, const int& tab_index, QWidget* parent, const GameInfo* game, bool create_cfg_from_global_cfg)
 	: QDialog(parent)
 	, m_tab_index(tab_index)
 	, ui(new Ui::settings_dialog)
@@ -137,7 +138,7 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 
 	if (game)
 	{
-		m_emu_settings->LoadSettings(game->serial);
+		m_emu_settings->LoadSettings(game->serial, create_cfg_from_global_cfg);
 		setWindowTitle(tr("Settings: [%0] %1", "Settings dialog").arg(qstr(game->serial)).arg(qstr(game->name)));
 	}
 	else
@@ -460,32 +461,37 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 	SubscribeTooltip(ui->gb_default_resolution, tooltips.settings.resolution);
 	// remove unsupported resolutions from the dropdown
 	bool saved_index_removed = false;
-	if (game && game->resolution > 0)
+	//if (game && game->resolution > 0) // Add this line when interlaced resolutions are implemented
 	{
-		const std::map<u32, std::string> resolutions
+		const std::map<video_resolution, u32> resolutions
 		{
-			{ psf::resolution_flag::_480p,      fmt::format("%s", video_resolution::_480) },
-			{ psf::resolution_flag::_576p,      fmt::format("%s", video_resolution::_576) },
-			{ psf::resolution_flag::_720p,      fmt::format("%s", video_resolution::_720) },
-			{ psf::resolution_flag::_1080p,     fmt::format("%s", video_resolution::_1080) },
-			// { psf::resolution_flag::_480p_16_9, fmt::format("%s", video_resolution::_480p_16:9) },
-			// { psf::resolution_flag::_576p_16_9, fmt::format("%s", video_resolution::_576p_16:9) },
+			{ video_resolution::_480p,       psf::resolution_flag::_480 | psf::resolution_flag::_480_16_9 },
+			{ video_resolution::_480i,       psf::resolution_flag::_480 | psf::resolution_flag::_480_16_9 },
+			{ video_resolution::_576p,       psf::resolution_flag::_576 | psf::resolution_flag::_576_16_9 },
+			{ video_resolution::_576i,       psf::resolution_flag::_576 | psf::resolution_flag::_576_16_9 },
+			{ video_resolution::_720p,       psf::resolution_flag::_720  },
+			{ video_resolution::_1080p,      psf::resolution_flag::_1080 },
+			{ video_resolution::_1080i,      psf::resolution_flag::_1080 },
+			{ video_resolution::_1600x1080p, psf::resolution_flag::_1080 },
+			{ video_resolution::_1440x1080p, psf::resolution_flag::_1080 },
+			{ video_resolution::_1280x1080p, psf::resolution_flag::_1080 },
+			{ video_resolution::_960x1080p,  psf::resolution_flag::_1080 },
 		};
 
 		const int saved_index = ui->resBox->currentIndex();
 
 		for (int i = ui->resBox->count() - 1; i >= 0; i--)
 		{
-			bool has_resolution = false;
-			for (const auto& res : resolutions)
-			{
-				if ((game->resolution & res.first) && res.second == sstr(ui->resBox->itemText(i)))
-				{
-					has_resolution = true;
-					break;
-				}
-			}
-			if (!has_resolution)
+			const auto [text, value] = get_data(ui->resBox, i);
+			const video_resolution resolution = static_cast<video_resolution>(value);
+
+			// Remove interlaced resolutions until they are properly implemented
+			const bool is_interlaced = (resolution == video_resolution::_1080i ||
+			                            resolution == video_resolution::_480i ||
+			                            resolution == video_resolution::_576i);
+			const bool supported_by_game = !game || (game && game->resolution > 0 && resolutions.contains(resolution) && (game->resolution & resolutions.at(resolution)));
+
+			if (!supported_by_game || is_interlaced)
 			{
 				ui->resBox->removeItem(i);
 				if (i == saved_index)
@@ -499,7 +505,7 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 	{
 		const auto [text, value] = get_data(ui->resBox, i);
 
-		if (text == "1280x720")
+		if (static_cast<video_resolution>(value) == video_resolution::_720p)
 		{
 			// Rename the default resolution for users
 			ui->resBox->setItemText(i, tr("1280x720 (Recommended)", "Resolution"));
@@ -864,11 +870,10 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 
 	const auto apply_fsr_specific_options = [r_creator, this]()
 	{
-		const bool is_vulkan = (ui->renderBox->currentText() == r_creator->Vulkan.name);
 		const auto [text, value] = get_data(ui->outputScalingMode, ui->outputScalingMode->currentIndex());
 		const bool fsr_selected = static_cast<output_scaling_mode>(value) == output_scaling_mode::fsr;
-		ui->fsrSharpeningStrength->setEnabled(is_vulkan && fsr_selected);
-		ui->fsrSharpeningStrengthReset->setEnabled(is_vulkan && fsr_selected);
+		ui->fsrSharpeningStrength->setEnabled(fsr_selected);
+		ui->fsrSharpeningStrengthReset->setEnabled(fsr_selected);
 	};
 
 	// Handle connects to disable specific checkboxes that depend on GUI state.
@@ -961,7 +966,7 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 		const std::string selected_device = m_emu_settings->GetSetting(emu_settings_type::AudioDevice);
 		int device_index = 0;
 
-		for (auto& dev : dev_array)
+		for (const audio_device_enumerator::audio_device& dev : dev_array)
 		{
 			const QString cur_item = qstr(dev.id);
 			ui->audioDeviceBox->addItem(qstr(dev.name), cur_item);
@@ -1007,6 +1012,9 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 		get_audio_output_devices(false);
 		change_audio_output_device(0); // Set device to 'Default'
 	});
+	
+	m_emu_settings->EnhanceComboBox(ui->combo_audio_channel_layout, emu_settings_type::AudioChannelLayout);
+	SubscribeTooltip(ui->gb_audio_channel_layout, tooltips.settings.audio_channel_layout);
 
 	connect(ui->combo_audio_format, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index)
 	{
@@ -1214,6 +1222,9 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 	m_emu_settings->EnhanceComboBox(ui->ghltarBox, emu_settings_type::GHLtar);
 	SubscribeTooltip(ui->gb_ghltar_emulated, tooltips.settings.ghltar);
 
+	m_emu_settings->EnhanceComboBox(ui->gameTabletBox, emu_settings_type::GameTablet);
+	SubscribeTooltip(ui->gametablet_emulated, tooltips.settings.gametablet);
+
 	m_emu_settings->EnhanceCheckBox(ui->backgroundInputBox, emu_settings_type::BackgroundInput);
 	SubscribeTooltip(ui->backgroundInputBox, tooltips.settings.background_input);
 
@@ -1231,6 +1242,12 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 	SubscribeTooltip(ui->loadSdlMappings, tooltips.settings.sdl_mappings);
 #else
 	ui->loadSdlMappings->setVisible(false);
+#endif
+
+#ifndef _WIN32
+	// Remove raw mouse handler
+	remove_item(ui->mouseHandlerBox, static_cast<int>(mouse_handler::raw), static_cast<int>(g_cfg.io.mouse.def));
+	remove_item(ui->moveBox, static_cast<int>(move_handler::raw_mouse), static_cast<int>(g_cfg.io.move.def));
 #endif
 
 	// Midi
@@ -1444,9 +1461,6 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 	SubscribeTooltip(ui->accurateDFMA, tooltips.settings.accurate_dfma);
 	ui->accurateDFMA->setDisabled(utils::has_fma3() || utils::has_fma4());
 
-	m_emu_settings->EnhanceCheckBox(ui->accurateGETLLAR, emu_settings_type::AccurateGETLLAR);
-	SubscribeTooltip(ui->accurateGETLLAR, tooltips.settings.accurate_getllar);
-
 	m_emu_settings->EnhanceCheckBox(ui->accurateRSXAccess, emu_settings_type::AccurateRSXAccess);
 	SubscribeTooltip(ui->accurateRSXAccess, tooltips.settings.accurate_rsx_access);
 
@@ -1462,11 +1476,14 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 	m_emu_settings->EnhanceCheckBox(ui->llvmPrecompilation, emu_settings_type::LLVMPrecompilation);
 	SubscribeTooltip(ui->llvmPrecompilation, tooltips.settings.llvm_precompilation);
 
-	m_emu_settings->EnhanceCheckBox(ui->suspendSavestates, emu_settings_type::SuspendEmulationSavestateMode);
-	SubscribeTooltip(ui->suspendSavestates, tooltips.settings.suspend_savestates);
+	m_emu_settings->EnhanceCheckBox(ui->antiCheatSavestates, emu_settings_type::SuspendEmulationSavestateMode);
+	SubscribeTooltip(ui->antiCheatSavestates, tooltips.settings.anti_cheat_savestates);
 
 	m_emu_settings->EnhanceCheckBox(ui->compatibleSavestates, emu_settings_type::CompatibleEmulationSavestateMode);
 	SubscribeTooltip(ui->compatibleSavestates, tooltips.settings.compatible_savestates);
+
+	m_emu_settings->EnhanceCheckBox(ui->spuProfiler, emu_settings_type::SPUProfiler);
+	SubscribeTooltip(ui->spuProfiler, tooltips.settings.spu_profiler);
 
 	m_emu_settings->EnhanceCheckBox(ui->silenceAllLogs, emu_settings_type::SilenceAllLogs);
 	SubscribeTooltip(ui->silenceAllLogs, tooltips.settings.silence_all_logs);
@@ -2069,6 +2086,24 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 		SubscribeTooltip(ui->gb_updates, tooltips.settings.check_update_start);
 		SubscribeTooltip(ui->gb_uuid, tooltips.settings.uuid);
 
+		// Pad navigation
+		SubscribeTooltip(ui->cb_pad_navigation, tooltips.settings.pad_navigation);
+		SubscribeTooltip(ui->cb_global_pad_navigation, tooltips.settings.global_navigation);
+		ui->cb_pad_navigation->setChecked(m_gui_settings->GetValue(gui::nav_enabled).toBool());
+		ui->cb_global_pad_navigation->setChecked(m_gui_settings->GetValue(gui::nav_global).toBool());
+#if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)
+		connect(ui->cb_pad_navigation, &QCheckBox::toggled, [this](bool checked)
+		{
+			m_gui_settings->SetValue(gui::nav_enabled, checked);
+		});
+		connect(ui->cb_global_pad_navigation, &QCheckBox::toggled, [this](bool checked)
+		{
+			m_gui_settings->SetValue(gui::nav_global, checked);
+		});
+#else
+		ui->gb_gui_pad_input->setEnabled(false);
+#endif
+
 		// Discord:
 		SubscribeTooltip(ui->useRichPresence, tooltips.settings.use_rich_presence);
 		SubscribeTooltip(ui->discordState, tooltips.settings.discord_state);
@@ -2307,6 +2342,9 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 	m_emu_settings->EnhanceCheckBox(ui->disableVertexCache, emu_settings_type::DisableVertexCache);
 	SubscribeTooltip(ui->disableVertexCache, tooltips.settings.disable_vertex_cache);
 
+	m_emu_settings->EnhanceCheckBox(ui->forceHwMSAAResolve, emu_settings_type::ForceHwMSAAResolve);
+	SubscribeTooltip(ui->forceHwMSAAResolve, tooltips.settings.force_hw_MSAA);
+
 	// Checkboxes: core debug options
 	m_emu_settings->EnhanceCheckBox(ui->alwaysStart, emu_settings_type::StartOnBoot);
 	SubscribeTooltip(ui->alwaysStart, tooltips.settings.start_on_boot);
@@ -2412,6 +2450,13 @@ void settings_dialog::AddStylesheets()
 	ui->combo_stylesheets->clear();
 
 	ui->combo_stylesheets->addItem(tr("None", "Stylesheets"), gui::NoStylesheet);
+
+	for (const QString& key : QStyleFactory::keys())
+	{
+		// Variant value: "native (<style>)"
+		ui->combo_stylesheets->addItem(tr("Native (%0)", "Stylesheets").arg(key), QString("%0 (%1)").arg(gui::NativeStylesheet, key));
+	}
+
 	ui->combo_stylesheets->addItem(tr("Default (Bright)", "Stylesheets"), gui::DefaultStylesheet);
 
 	for (const QString& entry : m_gui_settings->GetStylesheetEntries())

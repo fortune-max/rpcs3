@@ -202,13 +202,13 @@ void sys_spu_image::deploy(u8* loc, std::span<const sys_spu_segment> segs, bool 
 }
 
 lv2_spu_group::lv2_spu_group(utils::serial& ar) noexcept
-	: name(ar.operator std::string())
+	: name(ar.pop<std::string>())
 	, id(idm::last_id())
 	, max_num(ar)
 	, mem_size(ar)
 	, type(ar) // SPU Thread Group Type
 	, ct(lv2_memory_container::search(ar))
-	, has_scheduler_context(ar.operator u8())
+	, has_scheduler_context(ar.pop<u8>())
 	, max_run(ar)
 	, init(ar)
 	, prio([&ar]()
@@ -219,16 +219,16 @@ lv2_spu_group::lv2_spu_group(utils::serial& ar) noexcept
 
 		return prio;
 	}())
-	, run_state(ar.operator spu_group_status())
+	, run_state(ar.pop<spu_group_status>())
 	, exit_status(ar)
 {
 	for (auto& thread : threads)
 	{
-		if (ar.operator u8())
+		if (ar.pop<bool>())
 		{
 			ar(id_manager::g_id);
-			thread = std::make_shared<named_thread<spu_thread>>(ar, this);
-			idm::import_existing<named_thread<spu_thread>>(thread, idm::last_id());
+			thread = std::make_shared<named_thread<spu_thread>>(stx::launch_retainer{}, ar, this);
+			ensure(idm::import_existing<named_thread<spu_thread>>(thread, idm::last_id()));
 			running += !thread->stop_flag_removal_protection;
 		}
 	}
@@ -239,7 +239,7 @@ lv2_spu_group::lv2_spu_group(utils::serial& ar) noexcept
 
 	for (auto ep : {&ep_run, &ep_exception, &ep_sysmodule})
 	{
-		*ep = idm::get_unlocked<lv2_obj, lv2_event_queue>(ar.operator u32());
+		*ep = idm::get_unlocked<lv2_obj, lv2_event_queue>(ar.pop<u32>());
 	}
 
 	waiter_spu_index = -1;
@@ -328,7 +328,7 @@ void lv2_spu_group::save(utils::serial& ar)
 
 lv2_spu_image::lv2_spu_image(utils::serial& ar)
 	: e_entry(ar)
-	, segs(ar.operator decltype(segs)())
+	, segs(ar.pop<decltype(segs)>())
 	, nsegs(ar)
 {
 }
@@ -1352,7 +1352,8 @@ error_code sys_spu_thread_group_terminate(ppu_thread& ppu, u32 id, s32 value)
 	if (group->set_terminate)
 	{
 		// Wait for termination, only then return error code
-		const u64 last_stop = group->stop_count;
+		const u32 last_stop = group->stop_count;
+		group->wait_term_count++;
 		lock.unlock();
 		short_sleep(ppu);
 
@@ -1361,6 +1362,7 @@ error_code sys_spu_thread_group_terminate(ppu_thread& ppu, u32 id, s32 value)
 			group->stop_count.wait(last_stop);
 		}
 
+		group->wait_term_count--;
 		return CELL_ESTAT;
 	}
 
@@ -1414,7 +1416,8 @@ error_code sys_spu_thread_group_terminate(ppu_thread& ppu, u32 id, s32 value)
 	group->join_state = SYS_SPU_THREAD_GROUP_JOIN_TERMINATED;
 
 	// Wait until the threads are actually stopped
-	const u64 last_stop = group->stop_count;
+	const u32 last_stop = group->stop_count;
+	group->wait_term_count++;
 	lock.unlock();
 	short_sleep(ppu);
 
@@ -1423,6 +1426,7 @@ error_code sys_spu_thread_group_terminate(ppu_thread& ppu, u32 id, s32 value)
 		group->stop_count.wait(last_stop);
 	}
 
+	group->wait_term_count--;
 	return CELL_OK;
 }
 

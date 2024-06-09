@@ -183,11 +183,11 @@ namespace rsx
 				// Position the graphs within the body
 				const u16 graphs_width = m_body.w;
 				const u16 body_left = m_body.x;
-				u16 y_offset = m_body.y;
+				s16 y_offset = m_body.y;
 
 				if (m_body.h > 0)
 				{
-					y_offset += m_body.h + m_padding;
+					y_offset += static_cast<s16>(m_body.h + m_padding);
 				}
 
 				if (m_framerate_graph_enabled)
@@ -260,7 +260,7 @@ namespace rsx
 				m_frametime_timer.Start();
 			}
 
-			update();
+			update(get_system_time());
 
 			// The text might have changed during the update. Recalculate positions.
 			reset_transforms();
@@ -432,7 +432,7 @@ namespace rsx
 			m_force_update = true;
 		}
 
-		void perf_metrics_overlay::update()
+		void perf_metrics_overlay::update(u64 /*timestamp_us*/)
 		{
 			const auto elapsed_update = m_update_timer.GetElapsedTimeInMilliSec();
 			const bool do_update = m_force_update || elapsed_update >= m_update_interval;
@@ -646,7 +646,7 @@ namespace rsx
 			back_color = { 0.f, 0.f, 0.f, 0.5f };
 		}
 
-		void graph::set_pos(u16 _x, u16 _y)
+		void graph::set_pos(s16 _x, s16 _y)
 		{
 			m_label.set_pos(_x, _y);
 			overlay_element::set_pos(_x, _y + m_label.h);
@@ -878,21 +878,19 @@ namespace rsx
 			if (!g_cfg.misc.use_native_interface)
 				return;
 
-			if (auto& manager = g_fxo->get<rsx::overlays::display_manager>(); g_fxo->is_init<rsx::overlays::display_manager>())
+			if (auto manager = g_fxo->try_get<rsx::overlays::display_manager>())
 			{
 				auto& perf_settings = g_cfg.video.perf_overlay;
-				auto perf_overlay = manager.get<rsx::overlays::perf_metrics_overlay>();
+				auto perf_overlay = manager->get<rsx::overlays::perf_metrics_overlay>();
 
 				if (perf_settings.perf_overlay_enabled)
 				{
-					const bool existed = !!perf_overlay;
-
-					if (!existed)
+					if (!perf_overlay)
 					{
-						perf_overlay = manager.create<rsx::overlays::perf_metrics_overlay>();
+						perf_overlay = manager->create<rsx::overlays::perf_metrics_overlay>();
 					}
 
-					std::lock_guard lock(manager);
+					std::lock_guard lock(*manager);
 
 					perf_overlay->set_detail_level(perf_settings.level);
 					perf_overlay->set_position(perf_settings.position);
@@ -912,7 +910,7 @@ namespace rsx
 				}
 				else if (perf_overlay)
 				{
-					manager.remove<rsx::overlays::perf_metrics_overlay>();
+					manager->remove<rsx::overlays::perf_metrics_overlay>();
 				}
 			}
 		}

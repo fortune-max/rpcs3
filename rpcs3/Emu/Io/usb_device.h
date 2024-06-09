@@ -88,6 +88,7 @@ struct UsbDeviceHID
 
 struct UsbTransfer
 {
+	u32 assigned_number = 0;
 	u32 transfer_id = 0;
 
 	s32 result = 0;
@@ -144,6 +145,7 @@ struct UsbDescriptorNode
 		subnodes.push_back(newnode);
 		return subnodes.back();
 	}
+
 	u32 get_size() const
 	{
 		u32 nodesize = bLength;
@@ -153,16 +155,18 @@ struct UsbDescriptorNode
 		}
 		return nodesize;
 	}
-	void write_data(u8*& ptr)
+
+	u32 write_data(u8* ptr, u32 max_size) const
 	{
-		ptr[0] = bLength;
-		ptr[1] = bDescriptorType;
-		memcpy(ptr + 2, data, bLength - 2);
-		ptr += bLength;
-		for (auto& node : subnodes)
+		u32 size = std::min<u32>(bLength, max_size);
+		memcpy(ptr, this, size);
+		for (const auto& node : subnodes)
 		{
-			node.write_data(ptr);
+			const u32 remaining = max_size - size;
+			if (remaining == 0) break;
+			size += node.write_data(ptr + size, remaining);
 		}
+		return size;
 	}
 };
 

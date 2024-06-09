@@ -341,7 +341,7 @@ void kernel_explorer::update()
 		{
 			for (; cpu; cpu = cpu->get_next_cpu())
 			{
-				add_leaf(tree, qstr(fmt::format("Waiter: ID: 0x%x", cpu->id_type() == 2 ? static_cast<spu_thread*>(cpu)->lv2_id : cpu->id)));
+				add_leaf(tree, qstr(fmt::format("Waiter: ID: 0x%x", cpu->get_class() == thread_class::spu ? static_cast<spu_thread*>(cpu)->lv2_id : cpu->id)));
 			}
 		};
 
@@ -655,7 +655,7 @@ void kernel_explorer::update()
 	idm::select<named_thread<ppu_thread>>([&](u32 id, ppu_thread& ppu)
 	{
 		const auto func = ppu.last_function;
-		const ppu_thread_status status = lv2_obj::ppu_state(&ppu, false, false);
+		const ppu_thread_status status = lv2_obj::ppu_state(&ppu, false, false).first;
 
 		add_leaf(find_node(root, additional_nodes::ppu_threads), qstr(fmt::format(u8"PPU 0x%07x: “%s”, PRIO: %d, Joiner: %s, Status: %s, State: %s, %s func: “%s”%s", id, *ppu.ppu_tname.load(), ppu.prio.load().prio, ppu.joiner.load(), status, ppu.state.load()
 			, ppu.ack_suspend ? "After" : (ppu.current_function ? "In" : "Last"), func ? func : "", get_wait_time_str(ppu.start_time))));

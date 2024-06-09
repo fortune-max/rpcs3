@@ -484,18 +484,20 @@ void log_frame::RepaintTextColors()
 	QList<QColor> old_colors = m_color;
 	QColor old_stack_color = m_color_stack;
 
+	const QColor color = gui::utils::get_foreground_color();
+
 	// Get text color. Do this once to prevent possible slowdown
 	m_color.clear();
-	m_color.append(gui::utils::get_label_color("log_level_always"));
-	m_color.append(gui::utils::get_label_color("log_level_fatal"));
-	m_color.append(gui::utils::get_label_color("log_level_error"));
-	m_color.append(gui::utils::get_label_color("log_level_todo"));
-	m_color.append(gui::utils::get_label_color("log_level_success"));
-	m_color.append(gui::utils::get_label_color("log_level_warning"));
-	m_color.append(gui::utils::get_label_color("log_level_notice"));
-	m_color.append(gui::utils::get_label_color("log_level_trace"));
+	m_color.append(gui::utils::get_label_color("log_level_always", Qt::darkCyan, Qt::cyan));
+	m_color.append(gui::utils::get_label_color("log_level_fatal", Qt::darkMagenta, Qt::magenta));
+	m_color.append(gui::utils::get_label_color("log_level_error", Qt::red, Qt::red));
+	m_color.append(gui::utils::get_label_color("log_level_todo", Qt::darkYellow, Qt::darkYellow));
+	m_color.append(gui::utils::get_label_color("log_level_success", Qt::darkGreen, Qt::green));
+	m_color.append(gui::utils::get_label_color("log_level_warning", Qt::darkYellow, Qt::darkYellow));
+	m_color.append(gui::utils::get_label_color("log_level_notice", color, color));
+	m_color.append(gui::utils::get_label_color("log_level_trace", color, color));
 
-	m_color_stack = gui::utils::get_label_color("log_stack");
+	m_color_stack = gui::utils::get_label_color("log_stack", color, color);
 
 	// Use new colors if the old colors weren't set yet
 	if (old_colors.empty())
@@ -511,7 +513,7 @@ void log_frame::RepaintTextColors()
 	// Repaint TTY with new colors
 	QTextCursor tty_cursor = m_tty->textCursor();
 	QTextCharFormat text_format = tty_cursor.charFormat();
-	text_format.setForeground(gui::utils::get_label_color("tty_text"));
+	text_format.setForeground(gui::utils::get_label_color("tty_text", color, color));
 	tty_cursor.setCharFormat(text_format);
 	m_tty->setTextCursor(tty_cursor);
 
@@ -691,9 +693,34 @@ void log_frame::UpdateUI()
 	const QString font_start_tag_stack = "<font color = \"" % m_color_stack.name() % "\">";
 	static const QString font_end_tag = QStringLiteral("</font>");
 
-	static constexpr auto escaped = [](const QString& text)
+	static constexpr auto escaped = [](const QString& text, QString&& storage) -> const QString&
 	{
-		return text.toHtmlEscaped().replace(QStringLiteral("\n"), QStringLiteral("<br/>"));
+		const qsizetype nline = text.indexOf(QChar('\n'));
+		const qsizetype spaces = text.indexOf(QStringLiteral("  "));
+		const qsizetype html = std::max<qsizetype>({ text.indexOf(QChar('<')), text.indexOf(QChar('>')), text.indexOf(QChar('&')), text.indexOf(QChar('\"')) });
+
+		const qsizetype pos = std::max<qsizetype>({ html, nline, spaces });
+
+		if (pos < 0)
+		{
+			// Nothing to change, do not create copies of the string
+			return text;
+		}
+
+		// Allow to return reference of new string by using temporary storage provided by argument
+		storage = html < 0 ? text : text.toHtmlEscaped();
+
+		if (nline >= 0)
+		{
+			storage.replace(QChar('\n'), QStringLiteral("<br/>"));
+		}
+
+		if (spaces >= 0)
+		{
+			storage.replace(QChar::Space, QChar::Nbsp);
+		}
+
+		return storage;
 	};
 
 	// Preserve capacity
@@ -864,7 +891,7 @@ void log_frame::UpdateUI()
 			}
 
 			// Print UTF-8 text.
-			m_log_text += escaped(qstr(packet->msg));
+			m_log_text += escaped(qstr(packet->msg), QString{});
 
 			if (m_stack_log)
 			{

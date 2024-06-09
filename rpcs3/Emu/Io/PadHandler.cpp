@@ -9,7 +9,7 @@ cfg_input g_cfg_input;
 
 extern void pad_state_notify_state_change(usz index, u32 state);
 
-PadHandlerBase::PadHandlerBase(pad_handler type) : m_type(type)
+PadHandlerBase::PadHandlerBase(pad_handler type, bool emulation) : m_type(type), m_emulation(emulation)
 {
 }
 
@@ -32,105 +32,123 @@ s32 PadHandlerBase::MultipliedInput(s32 raw_value, s32 multiplier)
 	return (multiplier * raw_value) / 100;
 }
 
-// Get new scaled value between 0 and 255 based on its minimum and maximum
-f32 PadHandlerBase::ScaledInput(s32 raw_value, int minimum, int maximum, f32 range)
+// Get new scaled value between 0 and range based on its minimum and maximum
+f32 PadHandlerBase::ScaledInput(f32 raw_value, f32 minimum, f32 maximum, f32 deadzone, f32 range)
 {
-	// value based on max range converted to [0, 1]
-	const f32 val = static_cast<f32>(std::clamp(raw_value, minimum, maximum) - minimum) / (abs(maximum) + abs(minimum));
+	if (deadzone > 0 && deadzone > minimum)
+	{
+		// adjust minimum so we smoothly start at 0 when we surpass the deadzone value
+		minimum = deadzone;
+	}
+
+	// convert [min, max] to [0, 1]
+	const f32 val = static_cast<f32>(std::clamp(raw_value, minimum, maximum) - minimum) / (maximum - minimum);
+
+	// convert [0, 1] to [0, range]
 	return range * val;
 }
 
-// Get new scaled value between -255 and 255 based on its minimum and maximum
-f32 PadHandlerBase::ScaledInput2(s32 raw_value, int minimum, int maximum, f32 range)
+// Get new scaled value between -range and range based on its minimum and maximum
+f32 PadHandlerBase::ScaledAxisInput(f32 raw_value, f32 minimum, f32 maximum, f32 deadzone, f32 range)
 {
-	// value based on max range converted to [0, 1]
-	const f32 val = static_cast<f32>(std::clamp(raw_value, minimum, maximum) - minimum) / (abs(maximum) + abs(minimum));
+	// convert [min, max] to [0, 1]
+	f32 val = static_cast<f32>(std::clamp(raw_value, minimum, maximum) - minimum) / (maximum - minimum);
+
+	if (deadzone > 0)
+	{
+		// convert [0, 1] to [-0.5, 0.5]
+		val -= 0.5f;
+
+		// Convert deadzone to [0, 0.5]
+		deadzone = std::max(0.0f, std::min(1.0f, deadzone / maximum)) / 2.0f;
+
+		if (val >= 0.0f)
+		{
+			// Apply deadzone. The result will be [0, 0.5]
+			val = ScaledInput(val, 0.0f, 0.5f, deadzone, 0.5f);
+		}
+		else
+		{
+			// Apply deadzone. The result will be [-0.5, 0]
+			val = ScaledInput(std::abs(val), 0, 0.5f, deadzone, 0.5f) * -1.0f;
+		}
+
+		// convert [-0.5, 0.5] back to [0, 1]
+		val += 0.5f;
+	}
+
+	// convert [0, 1] to [-range, range]
 	return (2.0f * range * val) - range;
 }
 
 // Get normalized trigger value based on the range defined by a threshold
-u16 PadHandlerBase::NormalizeTriggerInput(u16 value, int threshold) const
+u16 PadHandlerBase::NormalizeTriggerInput(u16 value, u32 threshold) const
 {
 	if (value <= threshold || threshold >= trigger_max)
 	{
 		return static_cast<u16>(0);
 	}
 
-	if (threshold <= trigger_min)
-	{
-		return static_cast<u16>(ScaledInput(value, trigger_min, trigger_max));
-	}
-
-	const s32 val = static_cast<s32>(static_cast<f32>(trigger_max) * (value - threshold) / (trigger_max - threshold));
-	return static_cast<u16>(ScaledInput(val, trigger_min, trigger_max));
+	return static_cast<u16>(ScaledInput(static_cast<f32>(value), static_cast<f32>(trigger_min), static_cast<f32>(trigger_max), static_cast<f32>(threshold)));
 }
 
 // normalizes a directed input, meaning it will correspond to a single "button" and not an axis with two directions
 // the input values must lie in 0+
 u16 PadHandlerBase::NormalizeDirectedInput(s32 raw_value, s32 threshold, s32 maximum) const
 {
-	if (threshold >= maximum || maximum <= 0)
+	if (threshold >= maximum || maximum <= 0 || raw_value < 0)
 	{
 		return static_cast<u16>(0);
 	}
 
-	const f32 val = static_cast<f32>(std::clamp(raw_value, 0, maximum)) / maximum; // value based on max range converted to [0, 1]
-
-	if (threshold <= 0)
-	{
-		return static_cast<u16>(255.0f * val);
-	}
-
-	const f32 thresh = static_cast<f32>(threshold) / maximum; // threshold converted to [0, 1]
-	return static_cast<u16>(255.0f * std::clamp((val - thresh) / (1.0f - thresh), 0.0f, 1.0f));
+	return static_cast<u16>(ScaledInput(static_cast<f32>(raw_value), 0.0f, static_cast<f32>(maximum), static_cast<f32>(threshold)));
 }
 
-u16 PadHandlerBase::NormalizeStickInput(u16 raw_value, int threshold, int multiplier, bool ignore_threshold) const
+u16 PadHandlerBase::NormalizeStickInput(u16 raw_value, s32 threshold, s32 multiplier, bool ignore_threshold) const
 {
 	const s32 scaled_value = MultipliedInput(raw_value, multiplier);
 
 	if (ignore_threshold)
 	{
-		return static_cast<u16>(ScaledInput(scaled_value, 0, thumb_max));
+		threshold = 0;
 	}
 
-	return NormalizeDirectedInput(scaled_value, threshold, thumb_max);
+	return static_cast<u16>(ScaledInput(static_cast<f32>(scaled_value), 0.0f, static_cast<f32>(thumb_max), static_cast<f32>(threshold)));
 }
 
-// This function normalizes stick deadzone based on the DS3's deadzone, which is ~13%
+// This function normalizes stick deadzone based on the DS3's deadzone, which is ~13% (default of anti deadzone)
 // X and Y is expected to be in (-255) to 255 range, deadzone should be in terms of thumb stick range
 // return is new x and y values in 0-255 range
-std::tuple<u16, u16> PadHandlerBase::NormalizeStickDeadzone(s32 inX, s32 inY, u32 deadzone) const
+std::tuple<u16, u16> PadHandlerBase::NormalizeStickDeadzone(s32 inX, s32 inY, u32 deadzone, u32 anti_deadzone) const
 {
-	const f32 dz_range = deadzone / static_cast<f32>(std::abs(thumb_max)); // NOTE: thumb_max should be positive anyway
-
 	f32 X = inX / 255.0f;
 	f32 Y = inY / 255.0f;
 
-	if (dz_range > 0.f)
+	const f32 mag = std::min(sqrtf(X * X + Y * Y), 1.f);
+
+	if (mag > 0.f)
 	{
-		const f32 mag = std::min(sqrtf(X * X + Y * Y), 1.f);
+		const f32 dz_max = static_cast<f32>(thumb_max);
+		const f32 dz = deadzone / dz_max;
+		const f32 anti_dz = anti_deadzone / dz_max;
 
-		if (mag <= 0)
-		{
-			return std::tuple<u16, u16>(ConvertAxis(X), ConvertAxis(Y));
-		}
+		f32 pos;
 
-		if (mag > dz_range)
+		if (dz <= 0.f || mag > dz)
 		{
-			const f32 pos = std::lerp(0.13f, 1.f, (mag - dz_range) / (1 - dz_range));
-			const f32 scale = pos / mag;
-			X = X * scale;
-			Y = Y * scale;
+			const f32 range = 1.f - dz;
+			pos = std::lerp(anti_dz, 1.f, (mag - dz) / range);
 		}
 		else
 		{
-			const f32 pos = std::lerp(0.f, 0.13f, mag / dz_range);
-			const f32 scale = pos / mag;
-			X = X * scale;
-			Y = Y * scale;
+			pos = std::lerp(0.f, anti_dz, mag / dz);
 		}
+
+		const f32 scale = pos / mag;
+		X *= scale;
+		Y *= scale;
 	}
+
 	return std::tuple<u16, u16>(ConvertAxis(X), ConvertAxis(Y));
 }
 
@@ -156,7 +174,7 @@ u16 PadHandlerBase::ConvertAxis(f32 value)
 // using a simple scale/sensitivity increase would *work* although it eats a chunk of our usable range in exchange
 // this might be the best for now, in practice it seems to push the corners to max of 20x20, with a squircle_factor of 8000
 // This function assumes inX and inY is already in 0-255
-std::tuple<u16, u16> PadHandlerBase::ConvertToSquirclePoint(u16 inX, u16 inY, int squircle_factor)
+std::tuple<u16, u16> PadHandlerBase::ConvertToSquirclePoint(u16 inX, u16 inY, u32 squircle_factor)
 {
 	// convert inX and Y to a (-1, 1) vector;
 	const f32 x = (inX - 127.5f) / 127.5f;
@@ -374,10 +392,10 @@ void PadHandlerBase::get_motion_sensors(const std::string& pad_id, const motion_
 	callback(pad_id, std::move(preview_values));
 }
 
-void PadHandlerBase::convert_stick_values(u16& x_out, u16& y_out, const s32& x_in, const s32& y_in, const s32& deadzone, const s32& padsquircling) const
+void PadHandlerBase::convert_stick_values(u16& x_out, u16& y_out, s32 x_in, s32 y_in, u32 deadzone, u32 anti_deadzone, u32 padsquircling) const
 {
 	// Normalize our stick axis based on the deadzone
-	std::tie(x_out, y_out) = NormalizeStickDeadzone(x_in, y_in, deadzone);
+	std::tie(x_out, y_out) = NormalizeStickDeadzone(x_in, y_in, deadzone, anti_deadzone);
 
 	// Apply pad squircling if necessary
 	if (padsquircling != 0)
@@ -681,8 +699,8 @@ void PadHandlerBase::get_mapping(const pad_ensemble& binding)
 	u16 lx, ly, rx, ry;
 
 	// Normalize and apply pad squircling
-	convert_stick_values(lx, ly, stick_val[0], stick_val[1], cfg->lstickdeadzone, cfg->lpadsquircling);
-	convert_stick_values(rx, ry, stick_val[2], stick_val[3], cfg->rstickdeadzone, cfg->rpadsquircling);
+	convert_stick_values(lx, ly, stick_val[0], stick_val[1], cfg->lstickdeadzone, cfg->lstick_anti_deadzone, cfg->lpadsquircling);
+	convert_stick_values(rx, ry, stick_val[2], stick_val[3], cfg->rstickdeadzone, cfg->rstick_anti_deadzone, cfg->rpadsquircling);
 
 	if (m_type == pad_handler::ds4)
 	{
@@ -728,7 +746,11 @@ void PadHandlerBase::process()
 				input_log.success("%s device %d connected", m_type, i);
 
 				pad->m_port_status |= CELL_PAD_STATUS_CONNECTED + CELL_PAD_STATUS_ASSIGN_CHANGES;
-				pad_state_notify_state_change(i, CELL_PAD_STATUS_CONNECTED);
+
+				if (m_emulation && !pad->is_fake_pad)
+				{
+					pad_state_notify_state_change(i, CELL_PAD_STATUS_CONNECTED);
+				}
 
 				last_connection_status[i] = true;
 				connected_devices++;
@@ -752,7 +774,11 @@ void PadHandlerBase::process()
 					input_log.success("%s device %d connected by force", m_type, i);
 
 					pad->m_port_status |= CELL_PAD_STATUS_CONNECTED + CELL_PAD_STATUS_ASSIGN_CHANGES;
-					pad_state_notify_state_change(i, CELL_PAD_STATUS_CONNECTED);
+
+					if (m_emulation && !pad->is_fake_pad)
+					{
+						pad_state_notify_state_change(i, CELL_PAD_STATUS_CONNECTED);
+					}
 
 					last_connection_status[i] = true;
 					connected_devices++;
@@ -767,7 +793,10 @@ void PadHandlerBase::process()
 				pad->m_port_status &= ~CELL_PAD_STATUS_CONNECTED;
 				pad->m_port_status |= CELL_PAD_STATUS_ASSIGN_CHANGES;
 
-				pad_state_notify_state_change(i, CELL_PAD_STATUS_DISCONNECTED);
+				if (m_emulation)
+				{
+					pad_state_notify_state_change(i, CELL_PAD_STATUS_DISCONNECTED);
+				}
 
 				last_connection_status[i] = false;
 				connected_devices--;

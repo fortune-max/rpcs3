@@ -90,14 +90,22 @@ nt_p2p_port::~nt_p2p_port()
 		::close(p2p_socket);
 #endif
 	}
-
-	auto& nph = g_fxo->get<named_thread<np::np_handler>>();
-	nph.upnp_remove_port_mapping(port, "UDP");
 }
 
 void nt_p2p_port::dump_packet(p2ps_encapsulated_tcp* tcph)
 {
 	sys_net.trace("PACKET DUMP:\nsrc_port: %d\ndst_port: %d\nflags: %d\nseq: %d\nack: %d\nlen: %d", tcph->src_port, tcph->dst_port, tcph->flags, tcph->seq, tcph->ack, tcph->length);
+}
+
+// Must be used under bound_p2p_vports_mutex lock
+u16 nt_p2p_port::get_port()
+{
+	if (binding_port == 0)
+	{
+		binding_port = 30000;
+	}
+
+	return binding_port++;
 }
 
 bool nt_p2p_port::handle_connected(s32 sock_id, p2ps_encapsulated_tcp* tcp_header, u8* data, ::sockaddr_storage* op_addr)
@@ -107,7 +115,7 @@ bool nt_p2p_port::handle_connected(s32 sock_id, p2ps_encapsulated_tcp* tcp_heade
 			ensure(sock.get_type() == SYS_NET_SOCK_STREAM_P2P);
 			auto& sock_p2ps = reinterpret_cast<lv2_socket_p2ps&>(sock);
 
-			return sock_p2ps.handle_connected(tcp_header, data, op_addr);
+			return sock_p2ps.handle_connected(tcp_header, data, op_addr, this);
 		});
 
 	if (!sock)
@@ -137,9 +145,9 @@ bool nt_p2p_port::handle_listening(s32 sock_id, p2ps_encapsulated_tcp* tcp_heade
 
 bool nt_p2p_port::recv_data()
 {
-	::sockaddr_storage native_addr;
+	::sockaddr_storage native_addr{};
 	::socklen_t native_addrlen = sizeof(native_addr);
-	const auto recv_res        = ::recvfrom(p2p_socket, reinterpret_cast<char*>(p2p_recv_data.data()), p2p_recv_data.size(), 0, reinterpret_cast<struct sockaddr*>(&native_addr), &native_addrlen);
+	const auto recv_res        = ::recvfrom(p2p_socket, reinterpret_cast<char*>(p2p_recv_data.data()), ::size32(p2p_recv_data), 0, reinterpret_cast<struct sockaddr*>(&native_addr), &native_addrlen);
 
 	if (recv_res == -1)
 	{
@@ -207,7 +215,8 @@ bool nt_p2p_port::recv_data()
 		return true;
 	}
 
-	const u16 vport_flags = *reinterpret_cast<le_t<u16>*>(p2p_recv_data.data() + sizeof(u16));
+	const u16 src_vport = *reinterpret_cast<le_t<u16>*>(p2p_recv_data.data() + sizeof(u16));
+	const u16 vport_flags = *reinterpret_cast<le_t<u16>*>(p2p_recv_data.data() + sizeof(u16) + sizeof(u16));
 	std::vector<u8> p2p_data(recv_res - VPORT_P2P_HEADER_SIZE);
 	memcpy(p2p_data.data(), p2p_recv_data.data() + VPORT_P2P_HEADER_SIZE, p2p_data.size());
 
@@ -221,7 +230,7 @@ bool nt_p2p_port::recv_data()
 			p2p_addr.sin_len    = sizeof(sys_net_sockaddr_in);
 			p2p_addr.sin_family = SYS_NET_AF_INET;
 			p2p_addr.sin_addr   = std::bit_cast<be_t<u32>, u32>(reinterpret_cast<struct sockaddr_in*>(&native_addr)->sin_addr.s_addr);
-			p2p_addr.sin_vport  = dst_vport;
+			p2p_addr.sin_vport  = src_vport;
 			p2p_addr.sin_port   = std::bit_cast<be_t<u16>, u16>(reinterpret_cast<struct sockaddr_in*>(&native_addr)->sin_port);
 
 			auto& bound_sockets = ::at32(bound_p2p_vports, dst_vport);
@@ -289,7 +298,10 @@ bool nt_p2p_port::recv_data()
 			return true;
 		}
 
-		// The packet is valid, check if it's bound
+		// The packet is valid
+		dump_packet(tcp_header);
+
+		// Check if it's bound
 		const u64 key_connected = (reinterpret_cast<struct sockaddr_in*>(&native_addr)->sin_addr.s_addr) | (static_cast<u64>(tcp_header->src_port) << 48) | (static_cast<u64>(tcp_header->dst_port) << 32);
 
 		{
@@ -313,9 +325,31 @@ bool nt_p2p_port::recv_data()
 				}
 				return true;
 			}
+
+			if (tcp_header->flags == p2ps_tcp_flags::RST)
+			{
+				sys_net.trace("[P2PS] Received RST on unbound P2PS");
+				return true;
+			}
+
+			// The P2PS packet was sent to an unbound vport, send a RST packet
+			p2ps_encapsulated_tcp send_hdr;
+			send_hdr.src_port = tcp_header->dst_port;
+			send_hdr.dst_port = tcp_header->src_port;
+			send_hdr.flags = p2ps_tcp_flags::RST;
+			auto packet = generate_u2s_packet(send_hdr, nullptr, 0);
+
+			if (::sendto(p2p_socket, reinterpret_cast<char*>(packet.data()), ::size32(packet), 0, reinterpret_cast<const sockaddr*>(&native_addr), sizeof(sockaddr_in)) == -1)
+			{
+				sys_net.error("[P2PS] Error sending RST to sender to unbound P2PS: %s", get_last_error(false));
+				return true;
+			}
+
+			sys_net.trace("[P2PS] Sent RST to sender to unbound P2PS");
+			return true;
 		}
 	}
 
-	sys_net.notice("Received a STREAM-P2P packet with no bound target");
+	sys_net.notice("Received a P2P packet with no bound target(dst_vport = %d)", dst_vport);
 	return true;
 }

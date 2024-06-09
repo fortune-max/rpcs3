@@ -43,7 +43,7 @@ struct trophy_context_t
 	trophy_context_t() = default;
 
 	trophy_context_t(utils::serial& ar)
-		: trp_name(ar.operator std::string())
+		: trp_name(ar.pop<std::string>())
 	{
 		std::string trophy_path = vfs::get(Emu.GetDir() + "TROPDIR/" + trp_name + "/TROPHY.TRP");
 		fs::file trp_stream(trophy_path);
@@ -55,7 +55,7 @@ struct trophy_context_t
 			trp_stream.open(trophy_path);
 		}
 
-		if (!ar.operator bool())
+		if (!ar.pop<bool>())
 		{
 			ar(read_only);
 			return;
@@ -986,7 +986,7 @@ error_code sceNpTrophyGetLatestTrophies()
 	return CELL_OK;
 }
 
-error_code sceNpTrophyUnlockTrophy(u32 context, u32 handle, s32 trophyId, vm::ptr<u32> platinumId)
+error_code sceNpTrophyUnlockTrophy(ppu_thread& ppu, u32 context, u32 handle, s32 trophyId, vm::ptr<u32> platinumId)
 {
 	sceNpTrophy.warning("sceNpTrophyUnlockTrophy(context=0x%x, handle=0x%x, trophyId=%d, platinumId=*0x%x)", context, handle, trophyId, platinumId);
 
@@ -1028,12 +1028,15 @@ error_code sceNpTrophyUnlockTrophy(u32 context, u32 handle, s32 trophyId, vm::pt
 	}
 
 	vm::var<CellRtcTick> tick;
-	if (error_code error = cellRtcGetCurrentTick(tick))
+	if (error_code error = cellRtcGetCurrentTick(ppu, tick))
 	{
 		sceNpTrophy.error("sceNpTrophyUnlockTrophy: Failed to get timestamp: 0x%x", +error);
 	}
 
-	ctxt->tropusr->UnlockTrophy(trophyId, tick->tick, tick->tick);
+	if (ctxt->tropusr->UnlockTrophy(trophyId, tick->tick, tick->tick))
+	{
+		sceNpTrophy.notice("Trophy %d unlocked", trophyId);
+	}
 
 	// TODO: Make sure that unlocking platinum trophies is properly implemented and improve upon it
 	const std::string& config_path = vfs::get("/dev_hdd0/home/" + Emu.GetUsr() + "/trophy/" + ctxt->trp_name + "/TROPCONF.SFM");
@@ -1056,7 +1059,10 @@ error_code sceNpTrophyUnlockTrophy(u32 context, u32 handle, s32 trophyId, vm::pt
 	}
 
 	const std::string trophyPath = "/dev_hdd0/home/" + Emu.GetUsr() + "/trophy/" + ctxt->trp_name + "/TROPUSR.DAT";
-	ctxt->tropusr->Save(trophyPath);
+	if (!ctxt->tropusr->Save(trophyPath))
+	{
+		sceNpTrophy.error("sceNpTrophyUnlockTrophy: failed to save '%s'", trophyPath);
+	}
 
 	if (g_cfg.misc.show_trophy_popups)
 	{

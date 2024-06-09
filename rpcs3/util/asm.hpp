@@ -2,6 +2,7 @@
 
 #include "util/types.hpp"
 #include "util/tsc.hpp"
+#include "util/atomic.hpp"
 #include <functional>
 
 extern bool g_use_rtm;
@@ -113,7 +114,7 @@ namespace utils
 		const void* ptr = reinterpret_cast<const void*>(value);
 
 #ifdef _M_X64
-		return _mm_prefetch(static_cast<const char*>(ptr), 2);
+		return _mm_prefetch(static_cast<const char*>(ptr), _MM_HINT_T1);
 #else
 		return __builtin_prefetch(ptr, 0, 2);
 #endif
@@ -128,7 +129,7 @@ namespace utils
 		}
 
 #ifdef _M_X64
-		return _mm_prefetch(static_cast<const char*>(ptr), 3);
+		return _mm_prefetch(static_cast<const char*>(ptr), _MM_HINT_T0);
 #else
 		return __builtin_prefetch(ptr, 0, 3);
 #endif
@@ -375,10 +376,10 @@ namespace utils
 	}
 
 	// Align to power of 2
-	template <typename T, typename = std::enable_if_t<std::is_unsigned_v<T>>>
-	constexpr T align(T value, std::type_identity_t<T> align)
+	template <typename T, typename U, typename = std::enable_if_t<std::is_unsigned_v<T>>>
+	constexpr std::make_unsigned_t<std::common_type_t<T, U>> align(T value, U align)
 	{
-		return static_cast<T>((value + (align - 1)) & (T{0} - align));
+		return static_cast<std::make_unsigned_t<std::common_type_t<T, U>>>((value + (align - 1)) & (T{0} - align));
 	}
 
 	// General purpose aligned division, the result is rounded up not truncated
@@ -433,6 +434,19 @@ namespace utils
 	constexpr T mul_saturate(T factor1, T factor2)
 	{
 		return factor1 > 0 && T{umax} / factor1 < factor2 ? T{umax} : static_cast<T>(factor1 * factor2);
+	}
+
+	inline void trigger_write_page_fault(void* ptr)
+	{
+#if defined(ARCH_X64) && !defined(_MSC_VER)
+		__asm__ volatile("lock orl $0, 0(%0)" :: "r" (ptr));
+#elif defined(ARCH_ARM64)
+		u32 value = 0;
+		u32* u32_ptr = static_cast<u32*>(ptr);
+		__asm__ volatile("ldset %w0, %w0, %1" : "+r"(value), "=Q"(*u32_ptr) : "r"(value));
+#else
+		*static_cast<atomic_t<u32> *>(ptr) += 0;
+#endif
 	}
 
 	inline void trap()

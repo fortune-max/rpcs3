@@ -13,18 +13,11 @@ namespace rpcs3::utils
 
 	bool install_pkg(const std::string& path);
 
-#ifdef _WIN32
-	std::string get_exe_dir();
-#elif defined(__APPLE__)
-	std::string get_app_bundle_path();
-#else
-	std::string get_executable_path();
-#endif
-
 	std::string get_emu_dir();
 	std::string get_hdd0_dir();
 	std::string get_hdd1_dir();
 	std::string get_cache_dir();
+	std::string get_cache_dir(std::string_view module_path);
 
 	std::string get_rap_file_path(const std::string_view& rap);
 	bool verify_c00_unlock_edat(const std::string_view& content_id, bool fast = false);
