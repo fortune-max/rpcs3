@@ -49,6 +49,7 @@ target_sources(rpcs3_emu PRIVATE
     ../util/yaml.cpp
     ../util/vm_native.cpp
     ../util/dyn_lib.cpp
+    ../util/frame_listener.cpp
     ../util/sysinfo.cpp
     ../util/cpu_stats.cpp
     ../util/serialization_ext.cpp

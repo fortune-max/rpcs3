@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "media_utils.h"
 #include "Emu/System.h"
+#include "frame_listener.hpp"
 
 #include <random>
 
@@ -1388,6 +1389,8 @@ namespace utils
 								has_error = true;
 								break;
 							}
+							// send frames to shm
+							send_frame(&frame_data);
 
 							flush(av.video);
 
