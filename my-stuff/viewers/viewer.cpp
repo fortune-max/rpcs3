@@ -6,6 +6,8 @@
 #include <unistd.h>
 #include <cstring>
 
+// todo add frame rate
+
 int main() {
     const char *shmName = "/vectframe_shm";
     const int width = 1280;

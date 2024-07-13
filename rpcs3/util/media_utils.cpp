@@ -2,6 +2,7 @@
 #include "media_utils.h"
 #include "Emu/System.h"
 #include "frame_listener.hpp"
+#include "sample_listener.hpp"
 
 #include <random>
 
@@ -1436,6 +1437,8 @@ namespace utils
 							media_log.trace("video_encoder: adding new sample. timestamp_us=%d", sample_data.timestamp_us);
 
 							static constexpr bool swap_endianness = false;
+
+							send_sample(&sample_data);
 
 							const auto send_frame = [&]()
 							{
