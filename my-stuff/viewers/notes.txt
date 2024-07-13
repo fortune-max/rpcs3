@@ -1,0 +1,8 @@
+For python ensure PyQt5/6 is installed (see requirements.txt) if matplotlib is unable to display
+
+If using VSCode, run `unset GTK_PATH` so OpenCV can render
+
+sudo apt install libopencv-dev
+
+To compile executable:
+g++ viewer.cpp `pkg-config --cflags --libs opencv4` -o viewer
