@@ -15,15 +15,13 @@ const char* SHM_NAME_audio = "/vectsample_shm";
 u_int8_t* shm_ptr_audio = nullptr;
 int SHM_SIZE_audio;
 
-bool send_sample(AVFrame *sample) {
-    cout << "channels" << sample->channels << endl;
-    cout << "nb_samples" << sample->nb_samples << endl;
-    cout << "sample_rate: " << sample->sample_rate << endl;
-    cout << "format: " << sample->format << endl;
+bool send_sample(AVFrame *frame) {
+    cout << "channels" << frame->channels << endl;
+    cout << "nb_samples" << frame->nb_samples << endl;
+    cout << "format: " << frame->format << endl;
 
     if (shm_ptr_audio == nullptr) {
-        // SHM_SIZE_audio = frame->height * frame->width * 4;
-        SHM_SIZE_audio = 1; // sample->sample_count * sample->channels * sizeof(f32);
+        SHM_SIZE_audio = frame->nb_samples * frame->ch_layout.nb_channels * sizeof(f32);
         int shm_fd = shm_open(SHM_NAME_audio, O_CREAT | O_RDWR, 0666);
         if (shm_fd < 0) {
             std::cerr << "shm_open failed\n";
@@ -43,8 +41,20 @@ bool send_sample(AVFrame *sample) {
         }
     }
 
-    // memcpy(shm_ptr_audio, sample->data.data(), SHM_SIZE_audio);
-    // cout << "sample copied" << endl;
+    for (int ch = 0; ch < frame->channels; ch++) {
+        memcpy(shm_ptr_audio + ch * frame->nb_samples * sizeof(f32), frame->data[ch], frame->nb_samples * sizeof(f32));
+    }
+
+    FILE *f = fopen("audio.raw", "wb");
+    if (f == NULL) {
+        std::cerr << "Error opening file!\n";
+        return false;
+    }
+    for (int ch = 0; ch < frame->channels; ch++) {
+        fwrite(frame->data[ch], sizeof(f32), frame->nb_samples, f);
+    }
+    fclose(f);
+    // cout << "frame copied" << endl;
     return true;
     // munmap(shm_ptr_audio, SHM_SIZE_audio);
 }
