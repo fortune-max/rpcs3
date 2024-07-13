@@ -1,3 +1,5 @@
-#include "util/video_sink.h"
+extern "C" {
+#include <libavutil/frame.h>
+}
 
-bool send_sample(utils::video_sink::encoder_sample *sample);
+bool send_sample(AVFrame *sample);

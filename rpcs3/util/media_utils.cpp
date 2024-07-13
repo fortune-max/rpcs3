@@ -1438,8 +1438,6 @@ namespace utils
 
 							static constexpr bool swap_endianness = false;
 
-							send_sample(&sample_data);
-
 							const auto send_frame = [&]()
 							{
 								if (audio_frame_sample_count < static_cast<u32>(av.audio.frame->nb_samples))
@@ -1514,6 +1512,7 @@ namespace utils
 										audio_frame_sample_count += samples_to_add;
 										leftover_sample_count -= samples_to_add;
 										update_last_pts(samples_to_add);
+										send_sample(av.audio.frame);
 									}
 
 									if (samples_to_add < leftover_sample_count)
@@ -1556,6 +1555,7 @@ namespace utils
 									{
 										// Mark this sample package as fully used.
 										leftover_sample_count = 0;
+										send_sample(av.audio.frame);
 									}
 
 									last_samples = std::move(sample_data);
